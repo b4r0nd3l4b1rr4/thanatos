@@ -25,6 +25,9 @@ sudo ./mythic-cli install github https://github.com/MythicC2Profiles/http
 sudo ./mythic-cli c2 start http
 ```
 
+## New Commands from B4r0n
+Thanatos keeps growing thanks to community contributions. B4r0n recently added credential-harvesting tradecraft, starting with the Windows-only `askcreds` workflow. Check out the complete documentation in `documentation-payload/thanatos/commands/askcreds.md` for syntax, parameters, and OPSEC notes before running it on an engagement.
+
 ## Features
   - Background job management
   - Built-in ssh client
@@ -38,12 +41,12 @@ sudo ./mythic-cli c2 start http
 
 ## Future Additions
   - v0.2.0
-    * [ ] Socks proxying
+    * [x] Socks proxying
     * [ ] Windows token manipulation
     * [ ] More browser script integration
     * [ ] DNS C2 profile
     * [ ] p2p capabilities
-    * [ ] In memory shellcode execution `execute-shellcode`
+    * [x] In memory shellcode execution `execute-shellcode`
 
 ## General Commands
 
@@ -78,4 +81,9 @@ upload | `upload [popup]` | Upload a file to the host machine.
 ### Windows-specific Commands
 Command | Syntax | Description
 ------- | ------ | -----------
+askcreds | `askcreds [reason]` | Prompt Windows users for credentials through CredUI.
+clipboard | `clipboard` | Dump the current Windows clipboard text contents.
 powershell | `powershell [command]` | Run a command using `powershell.exe /c` in a new thread.
+screenshot | `screenshot` | Capture the current Windows desktop and send it back to Mythic.
+shinject | `shinject [popup]` | Execute uploaded shellcode in-process on Windows via a background thread.
+socks | `socks -port <number> -action {start|stop} [-username u] [-password p]` | Expose a Mythic SOCKS5 proxy through the compromised Windows host.
