@@ -346,7 +346,7 @@ class SshCommand(CommandBase):
                 )
 
                 if not resp.Success:
-                    raise Exception(resp.error)
+                    raise Exception(resp.Error)
 
                 file_name = resp.Files[0].Filename
 
@@ -381,4 +381,4 @@ class SshCommand(CommandBase):
     async def process_response(
         self, task: PTTaskMessageAllData, response: str
     ) -> PTTaskProcessResponseMessageResponse:
-        pass
+        return PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)

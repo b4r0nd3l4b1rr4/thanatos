@@ -213,7 +213,7 @@ class SshSpawnCommand(CommandBase):
     async def process_response(
         self, task: PTTaskMessageAllData, response: str
     ) -> PTTaskProcessResponseMessageResponse:
-        pass
+        return PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
 
     async def payload_tasking(self, task: MythicTask, payload_uuid) -> MythicTask:
         task.set_stdout("Sending build task...")

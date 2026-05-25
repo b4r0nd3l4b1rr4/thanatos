@@ -39,9 +39,11 @@ class MvArguments(TaskArguments):
                 self.load_args_from_json_string(self.command_line)
             else:
                 self.verify_required_args_have_values()
-                args = self.command_line.split(" ")
-                self.set_arg("source", args[0])
-                self.set_arg("destination", args[1])
+                parts = self.command_line.split(None, 1)
+                if len(parts) < 2:
+                    raise Exception("Usage: mv <source> <destination>")
+                self.set_arg("source", parts[0])
+                self.set_arg("destination", parts[1])
 
     async def parse_dictionary(self, dictionary_arguments):
         self.load_args_from_dictionary(dictionary_arguments)
@@ -69,4 +71,4 @@ class MvCommand(CommandBase):
     async def process_response(
         self, task: PTTaskMessageAllData, response: str
     ) -> PTTaskProcessResponseMessageResponse:
-        pass
+        return PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)

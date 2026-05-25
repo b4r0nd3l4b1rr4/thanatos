@@ -140,40 +140,36 @@ class SleepCommand(CommandBase):
         jitter = task.args.get_arg("jitter")
 
         try:
-            # Try to directly convert this interval to seconds
             try:
                 real_interval = int(interval)
                 units = "s"
             except ValueError:
-                # Set the units to the last charater in the interval
                 units = interval[-1]
-
-                # Strip out the unit suffix of the interval
                 interval = interval[:-1]
 
-                if units == "s":  # Units are seconds
+                if units == "s":
                     conversion_factor = 1
-                elif units == "m":  # Units are minutes
+                elif units == "m":
                     conversion_factor = 60
-                elif units == "h":  # Units are hours
+                elif units == "h":
                     conversion_factor = 3600
                 else:
                     raise Exception("Invalid interval suffix [s, m, h]")
 
-                # Convert the inputted interval to seconds using the conversion factor
                 try:
                     real_interval = int(interval) * conversion_factor
                 except ValueError:
                     raise Exception("Invalid sleep interval")
 
-            # Check that the interval is not negative
             if real_interval < 0:
                 raise Exception("Interval cannot be negative")
 
-            # Make sure the jitter is not negative
             if jitter is not None and jitter < 0:
                 raise Exception("Jitter cannot be negative")
 
+            task.args.remove_arg("interval")
+            task.args.add_arg("interval", real_interval, type=ParameterType.Number)
+            task.display_params = f"interval = {interval}{units}, jitter = {jitter}%"
             task.completed_callback_function = "post_run_actions"
         except Exception as e:
             output = "".join(traceback.format_exception(e))
@@ -181,8 +177,4 @@ class SleepCommand(CommandBase):
             task.set_status(MythicStatus.Error)
             task.set_stderr(output)
 
-        # Set the new interval
-        task.args.remove_arg("interval")
-        task.args.add_arg("interval", real_interval, type=ParameterType.Number)
-        task.display_params = f"interval = {interval}{units}, jitter = {jitter}%"
         return task

@@ -76,4 +76,4 @@ class ShellCommand(CommandBase):
     async def process_response(
         self, task: PTTaskMessageAllData, response: str
     ) -> PTTaskProcessResponseMessageResponse:
-        pass
+        return PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)

@@ -40,9 +40,14 @@ class DownloadArguments(TaskArguments):
 
     async def parse_dictionary(self, dictionary_arguments):
         if "path" in dictionary_arguments:
-            dictionary_arguments["file"] = (
-                f"{dictionary_arguments['path']}, {dictionary_arguments['file']}"
-            )
+            if dictionary_arguments["path"][-1] == "/":
+                dictionary_arguments["file"] = (
+                    f"{dictionary_arguments['path']}{dictionary_arguments['file']}"
+                )
+            else:
+                dictionary_arguments["file"] = (
+                    f"{dictionary_arguments['path']}/{dictionary_arguments['file']}"
+                )
         self.load_args_from_dictionary(dictionary_arguments)
 
 
@@ -72,4 +77,4 @@ class DownloadCommand(CommandBase):
     async def process_response(
         self, task: PTTaskMessageAllData, response: str
     ) -> PTTaskProcessResponseMessageResponse:
-        pass
+        return PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)

@@ -39,9 +39,11 @@ class SetEnvArguments(TaskArguments):
                 self.load_args_from_json_string(self.command_line)
             else:
                 self.verify_required_args_have_values()
-                args = self.command_line.split(" ")
-                self.set_arg("name", args[0])
-                self.set_arg("value", args[1])
+                parts = self.command_line.split(None, 1)
+                if len(parts) < 2:
+                    raise Exception("Usage: setenv <name> <value>")
+                self.set_arg("name", parts[0])
+                self.set_arg("value", parts[1])
 
     async def parse_dictionary(self, dictionary_arguments):
         self.load_args_from_dictionary(dictionary_arguments)
@@ -74,4 +76,4 @@ class SetEnvCommand(CommandBase):
     async def process_response(
         self, task: PTTaskMessageAllData, response: str
     ) -> PTTaskProcessResponseMessageResponse:
-        pass
+        return PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
