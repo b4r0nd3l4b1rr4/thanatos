@@ -13,13 +13,18 @@
       "file browser",
       "file chunking",
       "process browser",
-      "process responses"
+      "process responses",
+      "socks"
     ],
     "custom": [
       "key exchange",
       "killdate",
       "ssh client",
-      "working hours"
+      "working hours",
+      "token manipulation",
+      "ldap queries",
+      "credential dumping",
+      "cleanup by technique"
     ]
   },
   "payload_output": [
@@ -36,6 +41,6 @@
     "http"
   ],
   "mythic_version": "3.2",
-  "agent_version": "0.1.14",
+  "agent_version": "0.2.0",
   "supported_wrappers": []
 }

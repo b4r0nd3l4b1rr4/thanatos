@@ -7,6 +7,23 @@ This changelog file adheres to [keepachangelog](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Added
+
+- `portfwd` command as alias for `redirect` (TCP port forwarding)
+- Token manipulation commands: `token_list`, `token_steal`, `token_make`, `token_use`, `token_revert`
+- AD/LDAP commands: `ldap_search`, `domain_info`, `domain_users`, `domain_computers`
+- Credential dumping: `credentials_dump` (vault, credman, sam, lsa_secrets)
+- Cleanup commands for purple-team: `cleanup`, `timestomp`, `eventlog_clear`
+
+### Changed
+
+- Removed MacOS from `socks` supported_os (agent only supports Windows/Linux)
+- Removed `getattr` usage in `shinject` in favor of direct field access
+- Removed embedded fallback shellcode from `shinject` (file upload required)
+- Removed emojis from `screenshot` response messages
+- Removed debug logging helpers from `socks` command
+- Documentation reformatted to match upstream Mythic conventions
+
 ## [0.1.14] - 2025-09-16
 
 ### Added

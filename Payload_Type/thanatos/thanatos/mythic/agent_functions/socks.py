@@ -1,28 +1,5 @@
-# POC by Gerar heavily based on medusa and apollo
 from mythic_container.MythicCommandBase import *
 from mythic_container.MythicRPC import *
-import datetime
-import traceback
-
-
-def _now():
-    return datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%fZ")
-
-
-async def _dbg(task_id: str, msg: str):
-    """
-    Append a debug line to the task output. Visible immediately in the UI.
-    """
-    line = f"[{_now()}] [socks] {msg}"
-    await SendMythicRPCResponseCreate(
-        MythicRPCResponseCreateMessage(TaskID=task_id, Response=line.encode())
-    )
-
-
-def _mask(s: str | None) -> str:
-    if not s:
-        return "(none)"
-    return "*" * 8
 
 
 class SocksArguments(TaskArguments):
@@ -93,13 +70,13 @@ class SocksCommand(CommandBase):
         "Enable a SOCKS5 proxy on the Mythic server tunneled through this agent. "
         "Compatible with proxychains/proxychains4. Use -port 0 to auto-assign."
     )
-    version = 4
-    script_only = True  # This is purely server/RPC-driven; nothing goes to the implant
+    version = 5
+    script_only = True
     author = "@RedTeamGPT"
     argument_class = SocksArguments
     attackmapping = ["T1090"]
     attributes = CommandAttributes(
-        supported_os=[SupportedOS.Windows, SupportedOS.Linux, SupportedOS.MacOS],
+        supported_os=[SupportedOS.Windows, SupportedOS.Linux],
         dependencies=[],
     )
 
@@ -113,46 +90,24 @@ class SocksCommand(CommandBase):
         username = taskData.args.get_arg("username")
         password = taskData.args.get_arg("password")
 
-        # Pre-flight debug
-        await _dbg(
-            taskData.Task.ID,
-            f"requested action={action} port={port} "
-            f"auth_user={username or '(none)'} auth_pass={_mask(password)}",
-        )
-
         try:
             if action == "start":
-                await _dbg(
-                    taskData.Task.ID,
-                    f"issuing MythicRPCProxyStart (PortType='socks', LocalPort={port})",
-                )
                 rpc_resp = await SendMythicRPCProxyStartCommand(
                     MythicRPCProxyStartMessage(
                         TaskID=taskData.Task.ID,
                         PortType="socks",
-                        LocalPort=port,  # 0 => auto-assign
+                        LocalPort=port,
                         Username=username,
                         Password=password,
                     )
                 )
 
-                # Dump key fields that might exist on the response object
-                assigned_port = getattr(rpc_resp, "LocalPort", None) or port
-                proxy_id = getattr(rpc_resp, "ProxyID", None)
-                err_text = rpc_resp.Error if hasattr(rpc_resp, "Error") else None
-
-                await _dbg(
-                    taskData.Task.ID,
-                    f"RPC start result: Success={rpc_resp.Success} "
-                    f"LocalPort={assigned_port} ProxyID={proxy_id} Error={err_text}",
-                )
-
                 if not rpc_resp.Success:
                     resp.Success = False
                     resp.TaskStatus = MythicStatus.Error
-                    resp.Stderr = err_text or "Failed to start SOCKS proxy"
-                    await _dbg(taskData.Task.ID, f"ERROR: {resp.Stderr}")
+                    resp.Stderr = rpc_resp.Error or "Failed to start SOCKS proxy"
                 else:
+                    assigned_port = rpc_resp.LocalPort or port
                     msg = f"Started SOCKS5 server on port {assigned_port}"
                     await SendMythicRPCResponseCreate(
                         MythicRPCResponseCreateMessage(
@@ -160,37 +115,24 @@ class SocksCommand(CommandBase):
                         )
                     )
                     resp.DisplayParams = f"-action start -port {assigned_port}"
-                    # CRITICAL: Don't set Completed=True for SOCKS start
-                    # The task needs to stay alive to process SOCKS data
                     resp.TaskStatus = "SOCKS Proxy Started"
-                    resp.Completed = False  # Keep task running
+                    resp.Completed = False
 
             elif action == "stop":
-                await _dbg(
-                    taskData.Task.ID,
-                    f"issuing MythicRPCProxyStop (PortType='socks', Port={port})",
-                )
                 rpc_resp = await SendMythicRPCProxyStopCommand(
                     MythicRPCProxyStopMessage(
                         TaskID=taskData.Task.ID,
                         PortType="socks",
                         Port=port,
-                        Username=username,  # optional
-                        Password=password,  # optional
+                        Username=username,
+                        Password=password,
                     )
-                )
-
-                err_text = rpc_resp.Error if hasattr(rpc_resp, "Error") else None
-                await _dbg(
-                    taskData.Task.ID,
-                    f"RPC stop result: Success={rpc_resp.Success} Error={err_text}",
                 )
 
                 if not rpc_resp.Success:
                     resp.Success = False
                     resp.TaskStatus = MythicStatus.Error
-                    resp.Stderr = err_text or "Failed to stop SOCKS proxy"
-                    await _dbg(taskData.Task.ID, f"ERROR: {resp.Stderr}")
+                    resp.Stderr = rpc_resp.Error or "Failed to stop SOCKS proxy"
                 else:
                     msg = f"Stopped SOCKS5 server on port {port}"
                     await SendMythicRPCResponseCreate(
@@ -200,19 +142,14 @@ class SocksCommand(CommandBase):
                     )
                     resp.DisplayParams = f"-action stop -port {port}"
                     resp.TaskStatus = MythicStatus.Success
-                    resp.Completed = True  # Stop task is fine to complete
+                    resp.Completed = True
 
             else:
-                err = f"Unknown action: {action}. Use 'start' or 'stop'."
                 resp.Success = False
                 resp.TaskStatus = MythicStatus.Error
-                resp.Stderr = err
-                await _dbg(taskData.Task.ID, f"ERROR: {err}")
+                resp.Stderr = f"Unknown action: {action}. Use 'start' or 'stop'."
 
         except Exception as e:
-            tb = traceback.format_exc()
-            msg = f"Unhandled exception in socks command: {e}\n{tb}"
-            await _dbg(taskData.Task.ID, msg)
             resp.Success = False
             resp.TaskStatus = MythicStatus.Error
             resp.Stderr = str(e)
@@ -222,6 +159,4 @@ class SocksCommand(CommandBase):
     async def process_response(
         self, task: PTTaskMessageAllData, response: any
     ) -> PTTaskProcessResponseMessageResponse:
-        # All action happens in create_go_tasking via RPC;
-        # still return Success to keep pipeline happy.
         return PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)

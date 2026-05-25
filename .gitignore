@@ -2,3 +2,9 @@
 .DS_Store
 
 /sync.sh
+
+__pycache__/
+*.pyc
+*.rvf
+*.rvf.lock
+ruvector.db
