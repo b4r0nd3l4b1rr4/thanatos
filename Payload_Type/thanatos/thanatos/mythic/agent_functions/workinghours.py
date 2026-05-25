@@ -72,17 +72,13 @@ def format_time(hour: int, minute: int) -> str:
 # Callback function to display output to Mythic
 async def formulate_output(task: PTTaskCompletionFunctionMessage):
     params = json.loads(task.TaskData.Task.Params)
-    working_start_hours = int(int(params["start"]) / 3600)
-    working_start_minutes = int(((params["start"] / 3600) - working_start_hours) * 60)
-
-    working_start_hours, working_start_minutes = int(working_start_hours), int(
-        working_start_minutes
-    )
+    working_start_hours = int(params["start"]) // 3600
+    working_start_minutes = (int(params["start"]) % 3600) // 60
 
     start_time_format = format_time(working_start_hours, working_start_minutes)
 
-    working_end_hours = int(int(params["end"]) / 3600)
-    working_end_minutes = int(((params["end"] / 3600) - working_end_hours) * 60)
+    working_end_hours = int(params["end"]) // 3600
+    working_end_minutes = (int(params["end"]) % 3600) // 60
 
     end_time_format = format_time(working_end_hours, working_end_minutes)
 

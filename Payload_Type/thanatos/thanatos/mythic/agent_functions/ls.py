@@ -46,7 +46,7 @@ class LsArguments(TaskArguments):
         if "file" in dictionary_arguments:
             if dictionary_arguments["path"][-1] == "/":
                 dictionary_arguments["path"] = (
-                    f"{dictionary_arguments['path']}, {dictionary_arguments['file']}"
+                    f"{dictionary_arguments['path']}{dictionary_arguments['file']}"
                 )
             else:
                 dictionary_arguments["path"] = (

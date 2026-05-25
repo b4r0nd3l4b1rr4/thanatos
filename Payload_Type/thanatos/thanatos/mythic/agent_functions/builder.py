@@ -193,7 +193,7 @@ class Thanatos(PayloadType):
 
             # Set up openssl environment variables
             openssl_env = "OPENSSL_STATIC=yes "
-            if arch == "x64":
+            if arch == "x86_64":
                 openssl_env += "OPENSSL_LIB_DIR=/usr/lib64 "
             else:
                 openssl_env += "OPENSSL_LIB_DIR=/usr/lib "
@@ -240,7 +240,7 @@ class Thanatos(PayloadType):
                 command += f" --features {','.join(features)}"
 
             # Copy any prebuilt dependencies if they exist
-            deps_suffix = "_static" if self.get_parameter("static") == "yes" else ""
+            deps_suffix = "_static" if self.get_parameter("static") else ""
 
             deps_path = f"/opt/{target_os}{deps_suffix}"
             if os.path.exists(deps_path):
@@ -280,7 +280,7 @@ class Thanatos(PayloadType):
             if stdout:
                 resp.set_build_stdout(f"{command}\n\n{stdout.decode()}")
             if stderr:
-                resp.set_build_stderr(stdout.decode())
+                resp.set_build_stderr(stderr.decode())
 
             target_name = ""
 

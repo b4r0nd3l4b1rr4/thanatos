@@ -1,6 +1,5 @@
 from mythic_container.MythicCommandBase import *
 from mythic_container.MythicRPC import *
-import json
 
 
 class ClipboardArguments(TaskArguments):
