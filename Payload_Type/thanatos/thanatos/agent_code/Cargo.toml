@@ -59,8 +59,10 @@ version = "0.3"
 features = [
   "aclapi",
   "errhandlingapi",
+  "fileapi",
   "handleapi",
   "heapapi",
+  "libloaderapi",
   "impl-default",
   "memoryapi",
   "processthreadsapi",
