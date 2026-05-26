@@ -63,7 +63,7 @@ pub fn process_socks_messages_sync() -> Result<(), Box<dyn Error>> {
     };
 
     if !msgs_to_process.is_empty() {
-        if let Err(e) = process_socks_messages(msgs_to_process, &state) {
+        if let Err(_e) = process_socks_messages(msgs_to_process, &state) {
             // eprintln!("[SOCKS] Processing error: {e}");
             // Don't propagate the error to avoid panicking the main agent
         }
@@ -191,8 +191,7 @@ fn process_socks_messages(
                         });
                         conns.insert(msg.server_id, stream);
                     }
-                    Err(e) => {
-                        // eprintln!("[SOCKS] Failed to connect to {:?}: {}", target_addr, e);
+                    Err(_e) => {
                         let err_resp = build_socks5_error(0x05);
                         responses.push(SocksMsg {
                             exit: false,
@@ -257,9 +256,7 @@ fn poll_all_connections(conns: &mut HashMap<u32, TcpStream>) -> Result<(), Box<d
             Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
                 // No data available - this is normal
             }
-            Err(e) => {
-                // Read error
-                // eprintln!("[SOCKS] Read error for server_id={}: {}", server_id, e);
+            Err(_e) => {
                 to_remove.push(*server_id);
                 responses.push(SocksMsg {
                     exit: true,
@@ -358,7 +355,6 @@ fn build_socks5_error(code: u8) -> Vec<u8> {
 // =========================
 pub fn get_socks_responses() -> Vec<SocksMsg> {
     if let Ok(mut queue) = SOCKS_OUTBOUND_QUEUE.lock() {
-        let count = queue.len();
         let responses = queue.drain(..).collect();
         // eprintln!("[SOCKS] Retrieved {} responses from SOCKS_OUTBOUND_QUEUE", count);
         responses

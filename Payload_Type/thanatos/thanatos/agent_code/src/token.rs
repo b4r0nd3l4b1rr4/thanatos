@@ -5,18 +5,14 @@ use std::error::Error;
 use std::sync::Mutex;
 
 #[cfg(target_os = "windows")]
-use winapi::{
-    ctypes::c_void,
-    shared::minwindef::DWORD,
-    um::{
-        handleapi::CloseHandle,
-        processthreadsapi::{OpenProcess, OpenProcessToken},
-        securitybaseapi::{DuplicateTokenEx, ImpersonateLoggedOnUser, RevertToSelf},
-        winbase::LogonUserW,
-        winnt::{
-            SecurityImpersonation, TokenPrimary, HANDLE, LOGON32_LOGON_NEW_CREDENTIALS,
-            LOGON32_PROVIDER_DEFAULT, MAXIMUM_ALLOWED, PROCESS_QUERY_INFORMATION, TOKEN_DUPLICATE,
-        },
+use winapi::um::{
+    handleapi::CloseHandle,
+    processthreadsapi::{OpenProcess, OpenProcessToken},
+    securitybaseapi::{DuplicateTokenEx, ImpersonateLoggedOnUser, RevertToSelf},
+    winbase::{LogonUserW, LOGON32_LOGON_NEW_CREDENTIALS, LOGON32_PROVIDER_DEFAULT},
+    winnt::{
+        SecurityImpersonation, TokenPrimary, HANDLE, MAXIMUM_ALLOWED,
+        PROCESS_QUERY_INFORMATION, TOKEN_DUPLICATE,
     },
 };
 
