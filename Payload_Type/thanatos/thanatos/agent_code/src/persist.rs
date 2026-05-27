@@ -1,4 +1,7 @@
-use crate::{AgentTask, mythic_success, mythic_error};
+use crate::{AgentTask, mythic_error};
+
+#[cfg(target_os = "windows")]
+use crate::mythic_success;
 use serde::Deserialize;
 
 #[cfg(target_os = "windows")]

