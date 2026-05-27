@@ -4,7 +4,6 @@ incremental = true
 
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"
-rustflags = ["-C", "link-args=-Wl,--subsystem,windows -lole32 -loleaut32 -lshell32 -luser32 -ladvapi32 -lws2_32"]
 
 [target.i686-pc-windows-gnu]
 linker = "i686-w64-mingw32-gcc"

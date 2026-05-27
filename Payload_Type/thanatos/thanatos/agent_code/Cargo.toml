@@ -9,8 +9,7 @@ edition = "2021"
 
 [profile.release]
 strip = "symbols"
-opt-level = 2
-codegen-units = 16
+opt-level = "s"
 
 
 [features]
