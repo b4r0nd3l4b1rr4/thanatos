@@ -23,7 +23,7 @@ class ForkAndRunArguments(TaskArguments):
                 cli_name="spawnto",
                 display_name="Spawn Target",
                 type=ParameterType.String,
-                default_value="C:\\Windows\\System32\\svchost.exe",
+                default_value="C:\\Windows\\System32\\RuntimeBroker.exe",
                 description="Path to sacrificial process to spawn",
                 parameter_group_info=[ParameterGroupInfo(required=False)],
             ),

