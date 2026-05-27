@@ -96,6 +96,9 @@ RUN sed -i '/offline/d' /root/.cargo/config.toml \
  && sed -i '/vendored-sources/d' /root/.cargo/config.toml \
  && mkdir -p /vendor /opt/kudaes \
  && git clone --depth 1 https://github.com/Kudaes/Shelter /opt/kudaes/Shelter \
+ && git clone --depth 1 https://github.com/Kudaes/MFTool /opt/kudaes/MFTool \
+ && git clone --depth 1 https://github.com/Kudaes/Puzzle /opt/kudaes/Puzzle \
+ && git clone --depth 1 https://github.com/Kudaes/Eclipse /opt/kudaes/Eclipse \
  && cargo fetch \
  && cargo vendor /vendor \
  && echo "" >> /root/.cargo/config.toml \
