@@ -62,7 +62,8 @@ class ShinjectCommand(CommandBase):
             comment="Shellcode prepared for injection",
         )
 
-        task.display_params = f"Executing {f.Filename} ({f.Size} bytes) in current process"
+        file_size = getattr(f, 'Size', getattr(f, 'size', getattr(f, 'ChunkSize', 0)))
+        task.display_params = f"Executing {f.Filename} ({file_size} bytes) in current process"
         return task
 
     async def process_response(
