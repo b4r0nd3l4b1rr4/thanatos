@@ -10,7 +10,6 @@ edition = "2021"
 [profile.release]
 strip = "symbols"
 lto = true
-panic = "abort"
 
 [build-dependencies]
 winres = "0.1"

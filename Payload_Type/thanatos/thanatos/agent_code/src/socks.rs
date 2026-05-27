@@ -88,7 +88,10 @@ fn process_socks_messages(
     msgs: Vec<SocksMsg>,
     state: &Arc<SocksState>,
 ) -> Result<(), Box<dyn Error>> {
-    let mut conns = state.connections.lock().unwrap();
+    let mut conns = match state.connections.lock() {
+        Ok(c) => c,
+        Err(e) => e.into_inner(),
+    };
     let mut responses = Vec::new();
 
     for msg in msgs {
@@ -209,9 +212,9 @@ fn process_socks_messages(
 
     // Send accumulated responses
     if !responses.is_empty() {
-        // eprintln!("[SOCKS] Adding {} responses to SOCKS_OUTBOUND_QUEUE", responses.len());
-        let mut q = SOCKS_OUTBOUND_QUEUE.lock().unwrap();
-        q.extend(responses);
+        if let Ok(mut q) = SOCKS_OUTBOUND_QUEUE.lock() {
+            q.extend(responses);
+        }
     }
 
     // Additionally, poll all existing connections for any data that might have arrived
@@ -274,9 +277,9 @@ fn poll_all_connections(conns: &mut HashMap<u32, TcpStream>) -> Result<(), Box<d
 
     // Add responses to the queue
     if !responses.is_empty() {
-        // eprintln!("[SOCKS] Polled connections: adding {} responses to SOCKS_OUTBOUND_QUEUE", responses.len());
-        let mut q = SOCKS_OUTBOUND_QUEUE.lock().unwrap();
-        q.extend(responses);
+        if let Ok(mut q) = SOCKS_OUTBOUND_QUEUE.lock() {
+            q.extend(responses);
+        }
     }
 
     Ok(())
