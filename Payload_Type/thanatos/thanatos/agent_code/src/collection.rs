@@ -1,5 +1,5 @@
-use crate::AgentTask;
-use crate::{mythic_success, mythic_error};
+#[allow(unused_imports)]
+use crate::{AgentTask, mythic_success, mythic_error};
 use serde::Deserialize;
 
 #[derive(Deserialize)]

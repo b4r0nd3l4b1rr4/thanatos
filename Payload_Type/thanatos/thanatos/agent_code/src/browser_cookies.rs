@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use crate::{AgentTask, mythic_error, mythic_success};
 use serde::Deserialize;
 use std::error::Error;

