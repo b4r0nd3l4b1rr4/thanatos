@@ -46,6 +46,7 @@ mod shinject;
 mod sleep;
 mod socks;
 mod stealth;
+mod syscalls;
 mod ssh;
 mod tasking;
 mod token;
