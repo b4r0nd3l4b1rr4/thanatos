@@ -282,10 +282,14 @@ fn find_coff_text_section(data: &[u8]) -> Option<usize> {
     }
 
     let num_sections = u16::from_le_bytes([data[2], data[3]]) as usize;
+    if num_sections == 0 || num_sections > 96 {
+        return None;
+    }
     let optional_header_size = u16::from_le_bytes([data[16], data[17]]) as usize;
-    let section_table_offset = 20 + optional_header_size;
+    let section_table_offset = 20usize.saturating_add(optional_header_size);
 
-    if data.len() < section_table_offset + (num_sections * 40) {
+    let required = section_table_offset.saturating_add(num_sections.saturating_mul(40));
+    if data.len() < required || required == 0 {
         return None;
     }
 

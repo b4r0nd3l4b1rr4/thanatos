@@ -20,12 +20,3 @@ pub unsafe fn resolve(dll: &str, func: &str) -> Option<*mut std::ffi::c_void> {
 
 /// Macro to resolve and call a Windows API function dynamically
 /// Usage: resolve_api!("kernel32.dll", "VirtualAlloc", fn(LPVOID, usize, u32, u32) -> LPVOID)
-#[cfg(target_os = "windows")]
-#[macro_export]
-macro_rules! resolve_api {
-    ($dll:expr, $func:expr, $ty:ty) => {{
-        let ptr = crate::winapi_resolve::resolve($dll, $func)
-            .expect(concat!("Failed to resolve ", $func));
-        std::mem::transmute::<_, $ty>(ptr)
-    }};
-}
