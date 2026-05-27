@@ -100,9 +100,7 @@ RUN sed -i '/offline/d' /root/.cargo/config.toml \
  && echo "[source.crates-io]" >> /root/.cargo/config.toml \
  && echo "replace-with = \"vendored-sources\"" >> /root/.cargo/config.toml \
  && echo "[source.vendored-sources]" >> /root/.cargo/config.toml \
- && echo "directory = \"/vendor\"" >> /root/.cargo/config.toml \
- && echo "[net]" >> /root/.cargo/config.toml \
- && echo "offline = true" >> /root/.cargo/config.toml
+ && echo "directory = \"/vendor\"" >> /root/.cargo/config.toml
 
 
 # 🧩 EXPLANATION:

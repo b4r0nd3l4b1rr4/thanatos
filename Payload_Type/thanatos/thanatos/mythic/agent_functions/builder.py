@@ -118,10 +118,10 @@ class Thanatos(PayloadType):
             name="evasion_level",
             parameter_type=BuildParameterType.ChooseOne,
             description=(
-                "Evasion capabilities to compile into the agent. "
-                "Evasion stack by @Kudaes (DInvoke_rs, Shelter, Eclipse, MFTool, Puzzle)."
+                "Evasion capabilities (requires network during build). "
+                "Based on @Kudaes DInvoke_rs + Shelter."
             ),
-            default_value="purple_team",
+            default_value="none",
             choices=["none", "evasion", "purple_team"],
             required=False,
         ),
