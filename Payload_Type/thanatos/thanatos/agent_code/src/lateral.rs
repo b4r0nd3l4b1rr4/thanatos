@@ -259,8 +259,12 @@ unsafe fn execute_via_scm(
         .ok_or("Failed to resolve CloseServiceHandle")?;
     let close_handle: CloseServiceHandle = std::mem::transmute(close_handle);
 
-    let remote_host = to_wide(&format!("\\\\{}", host));
-    let sc_manager = open_scm(remote_host.as_ptr(), std::ptr::null(), SC_MANAGER_ALL_ACCESS);
+    let sc_manager = if host == "localhost" || host == "127.0.0.1" || host == "." {
+        open_scm(std::ptr::null(), std::ptr::null(), SC_MANAGER_ALL_ACCESS)
+    } else {
+        let remote_host = to_wide(&format!("\\\\{}", host));
+        open_scm(remote_host.as_ptr(), std::ptr::null(), SC_MANAGER_ALL_ACCESS)
+    };
 
     if sc_manager.is_null() {
         return Err("Failed to open remote SCM".into());
