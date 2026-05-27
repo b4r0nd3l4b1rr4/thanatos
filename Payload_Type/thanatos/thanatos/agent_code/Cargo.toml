@@ -11,8 +11,6 @@ edition = "2021"
 strip = "symbols"
 lto = true
 
-[build-dependencies]
-winres = "0.1"
 
 [features]
 default = []

