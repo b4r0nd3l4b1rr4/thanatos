@@ -11,6 +11,7 @@ mod cat;
 mod cd;
 mod cleanup;
 mod clipboard;
+mod coffloader;
 mod collection;
 mod cp;
 mod credentials;
