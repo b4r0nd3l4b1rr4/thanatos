@@ -51,6 +51,7 @@ mod token;
 mod unsetenv;
 mod upload;
 mod utils;
+mod winapi_resolve;
 mod workinghours;
 
 // Re-export commonly used types

