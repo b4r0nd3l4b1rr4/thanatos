@@ -66,7 +66,6 @@ fn cleanup_registry(task: &AgentTask, target: &str) -> Result<serde_json::Value,
                 .ok_or("Failed to resolve RegDeleteKeyExA")?
         );
 
-        let target_c = std::ffi::CString::new(target)?;
         let (hkey, subkey) = parse_reg_path(target);
         let subkey_c = std::ffi::CString::new(subkey)?;
 

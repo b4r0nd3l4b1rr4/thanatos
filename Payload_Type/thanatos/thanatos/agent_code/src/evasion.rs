@@ -257,7 +257,7 @@ pub fn unhook(
 
         // Open the clean DLL file from disk
         // GENERIC_READ = 0x80000000, FILE_SHARE_READ = 0x1, OPEN_EXISTING = 3
-        let path_c = CString::new(dll_path.as_str()).unwrap();
+        let path_c = std::ffi::CString::new(dll_path.as_str()).unwrap();
         let file_handle = create_file_a(
             path_c.as_ptr(),
             0x80000000,
@@ -311,7 +311,7 @@ pub fn unhook(
         }
 
         // Get the in-memory base address of the DLL
-        let dll_name_c = CString::new(dll_name.as_str()).unwrap();
+        let dll_name_c = std::ffi::CString::new(dll_name.as_str()).unwrap();
         let dll_base = get_module_handle_a(dll_name_c.as_ptr());
 
         if dll_base.is_null() {
