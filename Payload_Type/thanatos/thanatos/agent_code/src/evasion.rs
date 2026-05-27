@@ -20,8 +20,6 @@ pub fn amsi_patch(
     tx: &mpsc::Sender<serde_json::Value>,
     rx: mpsc::Receiver<serde_json::Value>,
 ) -> Result<(), Box<dyn Error>> {
-    use std::ffi::CString;
-
     // Parse the task information
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
 
@@ -172,7 +170,6 @@ pub fn unhook(
     tx: &mpsc::Sender<serde_json::Value>,
     rx: mpsc::Receiver<serde_json::Value>,
 ) -> Result<(), Box<dyn Error>> {
-    use std::ffi::CString;
     use std::ptr;
 
     // Parse the task information

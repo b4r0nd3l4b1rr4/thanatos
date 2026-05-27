@@ -223,9 +223,6 @@ fn decrypt_chromium_password(encrypted: &[u8], master_key: &[u8]) -> String {
 
 #[cfg(target_os = "windows")]
 fn decrypt_aes_gcm(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Option<Vec<u8>> {
-    // Use bcrypt (Windows CNG) for AES-GCM
-    use std::process::Command;
-
     // PowerShell-free approach: use CNG via raw FFI
     // For simplicity and reliability, use a minimal inline decryption
     // The ciphertext includes the 16-byte GCM auth tag at the end

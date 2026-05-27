@@ -17,6 +17,3 @@ pub unsafe fn resolve(dll: &str, func: &str) -> Option<*mut std::ffi::c_void> {
     if addr.is_null() { return None; }
     Some(addr as *mut std::ffi::c_void)
 }
-
-/// Macro to resolve and call a Windows API function dynamically
-/// Usage: resolve_api!("kernel32.dll", "VirtualAlloc", fn(LPVOID, usize, u32, u32) -> LPVOID)

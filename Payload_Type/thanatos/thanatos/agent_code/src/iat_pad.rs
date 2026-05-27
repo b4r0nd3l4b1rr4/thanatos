@@ -2,7 +2,7 @@
 // This makes the binary's import profile match a normal Windows application
 
 #[cfg(target_os = "windows")]
-use winapi::um::winuser::{GetDesktopWindow, GetWindowTextW, IsWindow};
+use winapi::um::winuser::{GetDesktopWindow, IsWindow};
 #[cfg(target_os = "windows")]
 use winapi::um::synchapi::Sleep;
 #[cfg(target_os = "windows")]

@@ -10,7 +10,6 @@ struct HostArgs {
 /// Enumerate SMB shares on a host (Windows)
 #[cfg(target_os = "windows")]
 pub fn net_shares(task: &AgentTask) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    use std::ffi::CString;
     use std::ptr;
 
     let args: HostArgs = serde_json::from_str(&task.parameters)?;

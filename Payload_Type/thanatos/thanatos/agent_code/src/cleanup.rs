@@ -1,5 +1,6 @@
 use crate::{AgentTask, mythic_success, mythic_error};
 use serde::Deserialize;
+#[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
 #[derive(Debug, Deserialize)]
