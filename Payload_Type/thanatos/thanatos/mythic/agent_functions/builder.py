@@ -114,6 +114,14 @@ class Thanatos(PayloadType):
             default_value="entrypoint",
             required=False,
         ),
+        BuildParameter(
+            name="evasion_level",
+            parameter_type=BuildParameterType.ChooseOne,
+            description="Evasion capabilities to compile into the agent.",
+            default_value="none",
+            choices=["none", "evasion", "purple_team"],
+            required=False,
+        ),
     ]
     # Supported C2 profiles for thanatos
     c2_profiles = ["http"]
@@ -235,6 +243,11 @@ class Thanatos(PayloadType):
 
             if build_shared:
                 command += " -p thanatos_shared"
+
+            # Add evasion features if requested
+            evasion_level = self.get_parameter("evasion_level")
+            if evasion_level and evasion_level != "none":
+                features.append(evasion_level)
 
             if len(features) > 0:
                 command += f" --features {','.join(features)}"

