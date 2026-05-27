@@ -36,7 +36,6 @@ RUN dnf install -y \
     perl-Time-Piece \           # 🧩 new: fixes "Can't locate Time/Piece.pm"
     clang \
     curl \
-    git \
     make \
     musl-gcc \
     musl-libc-static \
@@ -94,9 +93,7 @@ WORKDIR /Mythic/thanatos/agent_code
 RUN sed -i '/offline/d' /root/.cargo/config.toml \
  && sed -i '/replace-with/d' /root/.cargo/config.toml \
  && sed -i '/vendored-sources/d' /root/.cargo/config.toml \
- && mkdir -p /vendor /opt/kudaes \
- && git clone --depth 1 https://github.com/Kudaes/DInvoke_rs /opt/kudaes/DInvoke_rs \
- && git clone --depth 1 https://github.com/Kudaes/Shelter /opt/kudaes/Shelter \
+ && mkdir -p /vendor \
  && cargo fetch \
  && cargo vendor /vendor \
  && echo "" >> /root/.cargo/config.toml \

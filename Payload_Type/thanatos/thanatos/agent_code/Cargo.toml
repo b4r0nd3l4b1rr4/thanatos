@@ -12,8 +12,6 @@ strip = "symbols"
 
 [features]
 default = []
-evasion = ["dinvoke_rs", "shelter"]
-purple_team = ["evasion"]
 
 [dependencies]
 # === Core serialization ===
@@ -50,9 +48,6 @@ tokio = { version = "1.36", features = ["net", "rt-multi-thread", "io-util", "ma
 openssl = { version = "0.10", features = ["vendored"] }
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 
-# === Evasion stack by @Kudaes (https://github.com/Kudaes) ===
-dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", optional = true }  # Indirect syscalls
-shelter = { path = "/opt/kudaes/Shelter", optional = true }         # Sleep obfuscation (ROP + AES)
 
 # === Platform-specific dependencies ===
 [target.'cfg(target_os = "linux")'.dependencies]

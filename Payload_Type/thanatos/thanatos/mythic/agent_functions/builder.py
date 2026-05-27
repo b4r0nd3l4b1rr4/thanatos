@@ -114,17 +114,6 @@ class Thanatos(PayloadType):
             default_value="entrypoint",
             required=False,
         ),
-        BuildParameter(
-            name="evasion_level",
-            parameter_type=BuildParameterType.ChooseOne,
-            description=(
-                "Evasion capabilities (requires network during build). "
-                "Based on @Kudaes DInvoke_rs + Shelter."
-            ),
-            default_value="none",
-            choices=["none", "evasion", "purple_team"],
-            required=False,
-        ),
     ]
     # Supported C2 profiles for thanatos
     c2_profiles = ["http"]
@@ -247,17 +236,6 @@ class Thanatos(PayloadType):
             if build_shared:
                 command += " -p thanatos_shared"
 
-            # Add evasion features if requested
-            evasion_level = self.get_parameter("evasion_level")
-            if evasion_level and evasion_level != "none":
-                if not os.path.exists("/opt/kudaes/DInvoke_rs/Cargo.toml"):
-                    resp.build_message = (
-                        "Evasion libraries not found at /opt/kudaes/. "
-                        "Rebuild the Docker image to clone @Kudaes repos. "
-                        "Set evasion_level to 'none' to build without evasion."
-                    )
-                    return resp
-                features.append(evasion_level)
 
             if len(features) > 0:
                 command += f" --features {','.join(features)}"
