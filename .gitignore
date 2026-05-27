@@ -8,3 +8,4 @@ __pycache__/
 *.rvf
 *.rvf.lock
 ruvector.db
+libwinapi_resolve.rlib
