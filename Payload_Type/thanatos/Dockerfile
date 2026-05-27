@@ -93,7 +93,9 @@ WORKDIR /Mythic/thanatos/agent_code
 RUN sed -i '/offline/d' /root/.cargo/config.toml \
  && sed -i '/replace-with/d' /root/.cargo/config.toml \
  && sed -i '/vendored-sources/d' /root/.cargo/config.toml \
- && mkdir -p /vendor \
+ && mkdir -p /vendor /opt/kudaes \
+ && git clone --depth 1 https://github.com/Kudaes/DInvoke_rs /opt/kudaes/DInvoke_rs || true \
+ && git clone --depth 1 https://github.com/Kudaes/Shelter /opt/kudaes/Shelter || true \
  && cargo fetch && cargo vendor /vendor \
  && echo "" >> /root/.cargo/config.toml \
  && echo "[source.crates-io]" >> /root/.cargo/config.toml \

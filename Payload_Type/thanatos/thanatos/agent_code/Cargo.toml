@@ -51,8 +51,8 @@ openssl = { version = "0.10", features = ["vendored"] }
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 
 # === Evasion stack by @Kudaes (https://github.com/Kudaes) ===
-dinvoke_rs = { git = "https://github.com/Kudaes/DInvoke_rs", optional = true }  # Indirect syscalls
-shelter = { git = "https://github.com/Kudaes/Shelter", optional = true }         # Sleep obfuscation (ROP + AES)
+dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", optional = true }  # Indirect syscalls
+shelter = { path = "/opt/kudaes/Shelter", optional = true }         # Sleep obfuscation (ROP + AES)
 
 # === Platform-specific dependencies ===
 [target.'cfg(target_os = "linux")'.dependencies]
