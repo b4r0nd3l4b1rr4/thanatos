@@ -78,6 +78,8 @@ features = [
   "winbase",
   "wincon",
   "wincred",
+  "wincrypt",
+  "dpapi",
   "winnt",
   "winuser",
   "wow64apiset",
