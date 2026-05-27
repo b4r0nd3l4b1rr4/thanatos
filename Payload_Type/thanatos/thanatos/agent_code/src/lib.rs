@@ -28,6 +28,7 @@ mod ls;
 mod mkdir;
 mod mv;
 mod netstat;
+mod obfstr;
 mod payloadvars;
 mod persist;
 mod portfwd;

