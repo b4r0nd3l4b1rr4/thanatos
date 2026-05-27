@@ -11,11 +11,9 @@ edition = "2021"
 strip = "symbols"
 
 [features]
-default = ["purple_team"]
-evasion = ["dinvoke_rs", "unwinder", "shelter", "eclipse"]
-advanced_collection = ["mftool"]
-minifilter_evasion = ["puzzle"]
-purple_team = ["evasion", "advanced_collection", "minifilter_evasion"]
+default = []
+evasion = ["dinvoke_rs", "shelter"]
+purple_team = ["evasion"]
 
 [dependencies]
 # === Core serialization ===
@@ -54,11 +52,7 @@ ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 
 # === Evasion stack by @Kudaes (https://github.com/Kudaes) ===
 dinvoke_rs = { git = "https://github.com/Kudaes/DInvoke_rs", optional = true }  # Indirect syscalls
-unwinder = { git = "https://github.com/Kudaes/Unwinder", optional = true }      # Call stack spoofing
 shelter = { git = "https://github.com/Kudaes/Shelter", optional = true }         # Sleep obfuscation (ROP + AES)
-eclipse = { git = "https://github.com/Kudaes/Eclipse", optional = true }         # Activation Context hijack
-mftool = { git = "https://github.com/Kudaes/MFTool", optional = true }           # Direct NTFS reads
-puzzle = { git = "https://github.com/Kudaes/Puzzle", optional = true }            # Minifilter evasion
 
 # === Platform-specific dependencies ===
 [target.'cfg(target_os = "linux")'.dependencies]

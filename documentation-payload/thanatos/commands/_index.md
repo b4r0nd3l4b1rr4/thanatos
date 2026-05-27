@@ -108,6 +108,9 @@ pre = "<b>1. </b>"
  * [timestomp](/agents/thanatos/commands/timestomp/)
  * [eventlog_clear](/agents/thanatos/commands/eventlog_clear/)
 
+## Evasion (Kudaes)
+ * [stealth_sleep](/agents/thanatos/commands/stealth_sleep/)
+
 ## C2 Management
  * [c2info](/agents/thanatos/commands/c2info/)
  * [killdate](/agents/thanatos/commands/killdate/)

