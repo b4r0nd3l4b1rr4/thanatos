@@ -1,3 +1,8 @@
+// Evasion techniques based on research and tooling by @Kudaes:
+// - Shelter (https://github.com/Kudaes/Shelter) — sleep obfuscation via ROP + AES-128
+// - MFTool (https://github.com/Kudaes/MFTool) — direct NTFS volume reads
+// - Puzzle (https://github.com/Kudaes/Puzzle) — minifilter abuse
+
 use crate::{AgentTask, mythic_success, mythic_error};
 use serde::Deserialize;
 use std::error::Error;

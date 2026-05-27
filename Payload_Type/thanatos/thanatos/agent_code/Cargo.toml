@@ -11,7 +11,7 @@ edition = "2021"
 strip = "symbols"
 
 [features]
-default = []
+default = ["purple_team"]
 evasion = ["dinvoke_rs", "unwinder", "shelter", "eclipse"]
 advanced_collection = ["mftool"]
 minifilter_evasion = ["puzzle"]
@@ -52,13 +52,13 @@ tokio = { version = "1.36", features = ["net", "rt-multi-thread", "io-util", "ma
 openssl = { version = "0.10", features = ["vendored"] }
 ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 
-# === Evasion stack (optional features) ===
-dinvoke_rs = { git = "https://github.com/Kudaes/DInvoke_rs", optional = true }
-unwinder = { git = "https://github.com/Kudaes/Unwinder", optional = true }
-shelter = { git = "https://github.com/Kudaes/Shelter", optional = true }
-eclipse = { git = "https://github.com/Kudaes/Eclipse", optional = true }
-mftool = { git = "https://github.com/Kudaes/MFTool", optional = true }
-puzzle = { git = "https://github.com/Kudaes/Puzzle", optional = true }
+# === Evasion stack by @Kudaes (https://github.com/Kudaes) ===
+dinvoke_rs = { git = "https://github.com/Kudaes/DInvoke_rs", optional = true }  # Indirect syscalls
+unwinder = { git = "https://github.com/Kudaes/Unwinder", optional = true }      # Call stack spoofing
+shelter = { git = "https://github.com/Kudaes/Shelter", optional = true }         # Sleep obfuscation (ROP + AES)
+eclipse = { git = "https://github.com/Kudaes/Eclipse", optional = true }         # Activation Context hijack
+mftool = { git = "https://github.com/Kudaes/MFTool", optional = true }           # Direct NTFS reads
+puzzle = { git = "https://github.com/Kudaes/Puzzle", optional = true }            # Minifilter evasion
 
 # === Platform-specific dependencies ===
 [target.'cfg(target_os = "linux")'.dependencies]

