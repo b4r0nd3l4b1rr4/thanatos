@@ -3,6 +3,47 @@ from mythic_container.MythicRPC import *
 import json
 
 
+class TokenEnumArguments(TaskArguments):
+    def __init__(self, command_line, **kwargs):
+        super().__init__(command_line, **kwargs)
+        self.args = []
+
+    async def parse_arguments(self):
+        pass
+
+
+class TokenEnumCommand(CommandBase):
+    cmd = "token_enum"
+    needs_admin = False
+    help_cmd = "token_enum"
+    description = "Enumerate running processes with their associated user/token. Helps identify targets for token_steal."
+    version = 1
+    author = "b4r0n"
+    argument_class = TokenEnumArguments
+    attackmapping = ["T1134", "T1057"]
+    attributes = CommandAttributes(
+        supported_os=[SupportedOS.Windows],
+    )
+
+    async def create_go_tasking(
+        self, taskData: PTTaskMessageAllData
+    ) -> PTTaskCreateTaskingMessageResponse:
+        return PTTaskCreateTaskingMessageResponse(TaskID=taskData.Task.ID, Success=True)
+
+    async def process_response(
+        self, task: PTTaskMessageAllData, response: any
+    ) -> PTTaskProcessResponseMessageResponse:
+        resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
+        if response:
+            await SendMythicRPCResponseCreate(
+                MythicRPCResponseCreateMessage(
+                    TaskID=task.Task.ID,
+                    Response=(response if isinstance(response, str) else json.dumps(response)).encode(),
+                )
+            )
+        return resp
+
+
 class TokenListArguments(TaskArguments):
     def __init__(self, command_line, **kwargs):
         super().__init__(command_line, **kwargs)

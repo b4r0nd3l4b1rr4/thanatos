@@ -188,6 +188,7 @@ impl Tasker {
                             "portfwd" => portfwd::port_forward(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "ssh-agent" => ssh::agent::ssh_agent(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "timestomp" => cleanup::timestomp(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
+                            "token_enum" => token::token_enum(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "token_list" => token::token_list(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "token_steal" => token::token_steal(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),
                             "token_make" => token::token_make(task).unwrap_or_else(|e| mythic_error!(task.id, e.to_string())),

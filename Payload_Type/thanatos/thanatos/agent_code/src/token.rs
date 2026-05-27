@@ -232,3 +232,123 @@ pub fn clear_all_tokens() -> usize {
     store.clear();
     count
 }
+
+#[cfg(target_os = "windows")]
+pub fn token_enum(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> {
+    use winapi::um::tlhelp32::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
+        PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+    use winapi::um::winnt::TOKEN_QUERY;
+
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap.is_null() || snap == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+            return Ok(mythic_error!(task.id, "Failed to create process snapshot"));
+        }
+
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        let mut results: Vec<serde_json::Value> = Vec::new();
+
+        if Process32FirstW(snap, &mut entry) != 0 {
+            loop {
+                let pid = entry.th32ProcessID;
+                let exe: String = entry.szExeFile.iter()
+                    .take_while(|&&c| c != 0)
+                    .map(|&c| c as u8 as char)
+                    .collect();
+
+                let username = get_process_user(pid);
+
+                results.push(serde_json::json!({
+                    "pid": pid,
+                    "name": exe,
+                    "user": username,
+                }));
+
+                if Process32NextW(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+
+        CloseHandle(snap);
+
+        let output = serde_json::to_string_pretty(&results)?;
+        Ok(mythic_success!(task.id, format!("Processes with token info ({} total):\n\n{}", results.len(), output)))
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn get_process_user(pid: u32) -> String {
+    use winapi::um::winnt::TOKEN_QUERY;
+    use winapi::um::securitybaseapi::GetTokenInformation;
+    use winapi::um::winnt::{TokenUser, TOKEN_USER};
+
+    let process = OpenProcess(0x0400, 0, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+    if process.is_null() {
+        return "(access denied)".to_string();
+    }
+
+    let mut token: HANDLE = std::ptr::null_mut();
+    if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+        CloseHandle(process);
+        return "(no token)".to_string();
+    }
+
+    let mut buf = vec![0u8; 256];
+    let mut len: u32 = 0;
+    if GetTokenInformation(token, TokenUser, buf.as_mut_ptr() as *mut _, buf.len() as u32, &mut len) == 0 {
+        CloseHandle(token);
+        CloseHandle(process);
+        return "(unknown)".to_string();
+    }
+
+    let token_user = &*(buf.as_ptr() as *const TOKEN_USER);
+    let sid = token_user.User.Sid;
+
+    let username = sid_to_username(sid);
+
+    CloseHandle(token);
+    CloseHandle(process);
+    username
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn sid_to_username(sid: winapi::um::winnt::PSID) -> String {
+    use winapi::um::winbase::LookupAccountSidW;
+
+    let mut name = vec![0u16; 256];
+    let mut domain = vec![0u16; 256];
+    let mut name_len: u32 = 256;
+    let mut domain_len: u32 = 256;
+    let mut sid_type: u32 = 0;
+
+    if LookupAccountSidW(
+        std::ptr::null(),
+        sid,
+        name.as_mut_ptr(),
+        &mut name_len,
+        domain.as_mut_ptr(),
+        &mut domain_len,
+        &mut sid_type,
+    ) == 0 {
+        return "(lookup failed)".to_string();
+    }
+
+    let domain_str: String = domain.iter().take_while(|&&c| c != 0).map(|&c| c as u8 as char).collect();
+    let name_str: String = name.iter().take_while(|&&c| c != 0).map(|&c| c as u8 as char).collect();
+
+    if domain_str.is_empty() {
+        name_str
+    } else {
+        format!("{}\\{}", domain_str, name_str)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn token_enum(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> {
+    Ok(mythic_error!(task.id, format!("token_enum {}", crate::obfstr::d(crate::obfstr::S_WINDOWS_ONLY))))
+}
