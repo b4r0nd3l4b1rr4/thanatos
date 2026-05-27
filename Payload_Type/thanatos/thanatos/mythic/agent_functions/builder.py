@@ -250,6 +250,13 @@ class Thanatos(PayloadType):
             # Add evasion features if requested
             evasion_level = self.get_parameter("evasion_level")
             if evasion_level and evasion_level != "none":
+                if not os.path.exists("/opt/kudaes/DInvoke_rs/Cargo.toml"):
+                    resp.build_message = (
+                        "Evasion libraries not found at /opt/kudaes/. "
+                        "Rebuild the Docker image to clone @Kudaes repos. "
+                        "Set evasion_level to 'none' to build without evasion."
+                    )
+                    return resp
                 features.append(evasion_level)
 
             if len(features) > 0:
