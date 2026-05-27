@@ -95,7 +95,6 @@ RUN sed -i '/offline/d' /root/.cargo/config.toml \
  && sed -i '/vendored-sources/d' /root/.cargo/config.toml \
  && mkdir -p /vendor \
  && cargo fetch && cargo vendor /vendor \
- && cp -r /vendor /root/.cargo/vendor \
  && echo "" >> /root/.cargo/config.toml \
  && echo "[source.crates-io]" >> /root/.cargo/config.toml \
  && echo "replace-with = \"vendored-sources\"" >> /root/.cargo/config.toml \
