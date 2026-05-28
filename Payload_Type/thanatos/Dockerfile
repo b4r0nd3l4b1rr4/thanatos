@@ -91,6 +91,7 @@ RUN mkdir -p /vendor /opt/kudaes \
  && git clone --depth 1 https://github.com/Kudaes/MFTool /opt/kudaes/MFTool \
  && git clone --depth 1 https://github.com/Kudaes/Puzzle /opt/kudaes/Puzzle \
  && git clone --depth 1 https://github.com/Kudaes/Eclipse /opt/kudaes/Eclipse \
+ && sed -i 's/dinvoke_rs = "=0.2.2"/dinvoke_rs = "=0.2.0"/' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
  && cd /opt/kudaes/Unwinder/unwinder \
  && printf 'fn main() {\n    let out_dir = std::env::var("OUT_DIR").unwrap();\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        let status = std::process::Command::new("yasm")\n            .args(&["-p", "masm", "-f", "win64", "-o"])\n            .arg(format!("{}/gateway.o", out_dir))\n            .arg("src/gateway.asm")\n            .status().expect("yasm failed - install yasm");\n        if !status.success() { panic!("yasm failed to assemble gateway.asm"); }\n        let status = std::process::Command::new("x86_64-w64-mingw32-ar")\n            .args(&["crs"])\n            .arg(format!("{}/libgateway.a", out_dir))\n            .arg(format!("{}/gateway.o", out_dir))\n            .status().expect("ar failed");\n        if !status.success() { panic!("ar failed to create libgateway.a"); }\n        println!("cargo:rustc-link-search=native={}", out_dir);\n        println!("cargo:rustc-link-lib=static=gateway");\n    } else {\n        cc::Build::new().file("src/gateway.asm").compile("gateway");\n    }\n}\n' > build.rs \
  && cd /Mythic/thanatos/agent_code \
