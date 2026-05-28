@@ -60,6 +60,9 @@ windows-acl = "0.1"
 wmi = "0.9"
 dinvoke_rs = "0.2.0"
 unwinder = { path = "/opt/kudaes/Unwinder" }
+shelter = { path = "/opt/kudaes/Shelter" }
+mftool-parser = { path = "/opt/kudaes/MFTool/parser" }
+puzzle-sync-provider = { path = "/opt/kudaes/Puzzle/SyncProvider/provider" }
 
 # winapi (scoped to windows target): añadidos los módulos que usamos en los ficheros
 [target.'cfg(target_os = "windows")'.dependencies.winapi]
@@ -94,3 +97,6 @@ features = [
   "windef",
   "basetsd",
 ]
+
+[patch.crates-io]
+unwinder = { path = "/opt/kudaes/Unwinder" }
