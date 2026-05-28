@@ -91,7 +91,9 @@ RUN cd /tmp \
  && sed -i 's/CC = clang-3.8/CC = gcc/' Makefile_Linux \
  && sed -i 's/-fwritable-strings//' Makefile_Linux \
  && sed -i 's/-ansi//' Makefile_Linux \
- && make -f Makefile_Linux \
+ && echo '/* stub */' > H/direct.h \
+ && echo '/* stub */' > H/io.h \
+ && make -f Makefile_Linux -j$(nproc) || make -f Makefile_Linux \
  && cp GccUnixR/uasm /usr/local/bin/uasm \
  && chmod +x /usr/local/bin/uasm \
  && rm -rf /tmp/UASM
