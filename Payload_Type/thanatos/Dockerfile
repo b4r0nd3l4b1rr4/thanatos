@@ -96,6 +96,7 @@ RUN cd /tmp \
  && sed -i '1i #ifndef _MAX_PATH\n#define _MAX_PATH 260\n#endif\n#define _pgmptr "uasm"\n#define _getcwd getcwd' dbgcv.c \
  && sed -i 's/(s - cv\.ps - 2)/((int)((char*)s - (char*)cv.ps) - 2)/' dbgcv.c \
  && sed -i 's/(s - start)/((int)((char*)s - (char*)start))/' dbgcv.c \
+ && sed -i 's/-funsigned-char/-funsigned-char -fcommon/' Makefile_Linux \
  && make -f Makefile_Linux -j$(nproc) \
  && cp GccUnixR/uasm /usr/local/bin/uasm \
  && chmod +x /usr/local/bin/uasm \
