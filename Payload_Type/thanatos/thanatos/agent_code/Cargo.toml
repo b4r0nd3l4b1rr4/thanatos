@@ -97,6 +97,3 @@ features = [
   "windef",
   "basetsd",
 ]
-
-[patch.crates-io]
-unwinder = { path = "/opt/kudaes/Unwinder/unwinder" }
