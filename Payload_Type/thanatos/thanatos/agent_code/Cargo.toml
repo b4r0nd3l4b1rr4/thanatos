@@ -61,8 +61,8 @@ wmi = "0.9"
 dinvoke_rs = "0.2.0"
 unwinder = { path = "/opt/kudaes/Unwinder/unwinder" }
 shelter = { path = "/opt/kudaes/Shelter" }
-mftool-parser = { path = "/opt/kudaes/MFTool/parser" }
-puzzle-sync-provider = { path = "/opt/kudaes/Puzzle/SyncProvider/provider" }
+mftool-parser = { path = "/opt/kudaes/MFTool/parser", package = "parser" }
+puzzle-sync-provider = { path = "/opt/kudaes/Puzzle/SyncProvider/provider", package = "provider" }
 
 # winapi (scoped to windows target): añadidos los módulos que usamos en los ficheros
 [target.'cfg(target_os = "windows")'.dependencies.winapi]
