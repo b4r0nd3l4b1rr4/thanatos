@@ -324,7 +324,7 @@ pub fn unhook(
         // Find .text section (typically the first section)
         let mut text_section: Option<&IMAGE_SECTION_HEADER> = None;
         for i in 0..num_sections {
-            let section = &*first_section.offset(i);
+            let section = &*first_section.add(i);
             if section.name[0] == b'.' && section.name[1] == b't' && section.name[2] == b'e' && section.name[3] == b'x' && section.name[4] == b't' {
                 text_section = Some(section);
                 break;
