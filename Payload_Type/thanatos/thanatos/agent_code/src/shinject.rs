@@ -7,14 +7,7 @@ use std::result::Result;
 use std::sync::mpsc;
 
 #[cfg(target_os = "windows")]
-use std::ptr;
-#[cfg(target_os = "windows")]
-use std::mem;
-
-#[cfg(target_os = "windows")]
 use winapi::shared::minwindef::DWORD;
-#[cfg(target_os = "windows")]
-use winapi::um::errhandlingapi::GetLastError;
 
 // WAIT_TIMEOUT constant
 #[cfg(target_os = "windows")]
