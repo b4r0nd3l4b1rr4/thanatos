@@ -59,7 +59,6 @@ libc = "0.2"
 windows-acl = "0.1"
 wmi = "0.9"
 dinvoke_rs = "0.2.0"
-unwinder = "0.1.4"
 
 # winapi (scoped to windows target): añadidos los módulos que usamos en los ficheros
 [target.'cfg(target_os = "windows")'.dependencies.winapi]
