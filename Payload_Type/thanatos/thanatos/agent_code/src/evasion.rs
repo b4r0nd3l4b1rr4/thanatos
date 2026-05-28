@@ -314,12 +314,16 @@ pub fn unhook(
 
         let nt_headers = (mapped_base as usize + dos_header.e_lfanew as usize) as *const IMAGE_NT_HEADERS;
 
-        // Section headers come after NT headers
-        let first_section = (nt_headers as usize + 4 + 20 + 224) as *const IMAGE_SECTION_HEADER;
+        // Read number of sections and optional header size from file header
+        let num_sections_offset = nt_headers as usize + 4 + 2; // after signature(4) + machine(2)
+        let num_sections = *(num_sections_offset as *const u16) as usize;
+        let opt_hdr_size_offset = nt_headers as usize + 4 + 16; // offset 16 in file header
+        let opt_hdr_size = *(opt_hdr_size_offset as *const u16) as usize;
+        let first_section = (nt_headers as usize + 4 + 20 + opt_hdr_size) as *const IMAGE_SECTION_HEADER;
 
         // Find .text section (typically the first section)
         let mut text_section: Option<&IMAGE_SECTION_HEADER> = None;
-        for i in 0..10 {
+        for i in 0..num_sections {
             let section = &*first_section.offset(i);
             if section.name[0] == b'.' && section.name[1] == b't' && section.name[2] == b'e' && section.name[3] == b'x' && section.name[4] == b't' {
                 text_section = Some(section);
@@ -341,6 +345,7 @@ pub fn unhook(
 
         let text_va = section.virtual_address as usize;
         let text_size = section.virtual_size as usize;
+        let text_raw_offset = section.pointer_to_raw_data as usize;
 
         // Change memory protection to RW via indirect syscall
         let text_addr = (dll_base as usize + text_va) as *mut std::ffi::c_void;
@@ -357,8 +362,8 @@ pub fn unhook(
             }
         };
 
-        // Copy clean .text section over the hooked version
-        let clean_text = (mapped_base as usize + text_va) as *const u8;
+        // Copy clean .text section over the hooked version (use file offset, not RVA)
+        let clean_text = (mapped_base as usize + text_raw_offset) as *const u8;
         let hooked_text = text_addr as *mut u8;
         ptr::copy_nonoverlapping(clean_text, hooked_text, text_size);
 

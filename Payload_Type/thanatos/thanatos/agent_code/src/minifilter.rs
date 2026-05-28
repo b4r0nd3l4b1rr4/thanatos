@@ -44,12 +44,12 @@ pub fn sync_drop(
             // The Cloud Filter API (CldFlt minifilter) provides the data on-demand
             // without triggering the EDR's minifilter chain
             puzzle_sync_provider::set_constants(
-                &sync_root,
-                &placeholder,
-                "", // backing_file_1 (not used in our mode)
-                "", // backing_file_2
-                &format!("{:X}", rand::random::<u64>()), // unique key
-                0,  // mode
+                sync_root.clone(),
+                placeholder.clone(),
+                file_data.clone(),
+                Vec::new(),
+                format!("{:X}", rand::random::<u64>()),
+                0,
             );
 
             if !puzzle_sync_provider::register_sync_root() {

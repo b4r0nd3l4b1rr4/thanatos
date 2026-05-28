@@ -77,23 +77,14 @@ pub unsafe fn nt_write_memory(
 
 #[cfg(target_os = "windows")]
 pub unsafe fn nt_free(addr: *mut c_void) -> Result<(), String> {
-    use dinvoke_rs::dinvoke;
-
-    let mut base = addr;
-    let mut size: usize = 0;
-
-    let status = dinvoke::nt_free_virtual_memory(
-        -1isize as *mut c_void,
-        &mut base,
-        &mut size,
-        0x8000, // MEM_RELEASE
-    );
-
-    if status == 0 {
-        Ok(())
-    } else {
-        Err(format!("NtFreeVirtualMemory: 0x{:X}", status))
-    }
+    // VirtualFree is not security-sensitive (freeing memory), use winapi_resolve
+    type VirtualFreeFn = unsafe extern "system" fn(*mut c_void, usize, u32) -> i32;
+    let vf: VirtualFreeFn = match crate::winapi_resolve::resolve("kernel32.dll", "VirtualFree") {
+        Some(p) => std::mem::transmute(p),
+        None => return Err("VirtualFree resolve failed".to_string()),
+    };
+    let result = vf(addr, 0, 0x8000); // MEM_RELEASE
+    if result != 0 { Ok(()) } else { Err("VirtualFree failed".to_string()) }
 }
 
 /// Resolve function address via PEB walking (no GetProcAddress in IAT)
