@@ -32,8 +32,8 @@ RUN dnf install -y \
     perl-IPC-Cmd \
     perl-File-Copy \
     perl-lib \
-    perl-core \                # 🧩 new: provides missing Perl stdlib modules
-    perl-Time-Piece \           # 🧩 new: fixes "Can't locate Time/Piece.pm"
+    perl-core \
+    perl-Time-Piece \
     clang \
     curl \
     git \
