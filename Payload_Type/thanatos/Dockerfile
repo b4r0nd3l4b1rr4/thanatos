@@ -110,6 +110,8 @@ RUN mkdir -p /vendor /opt/kudaes \
  && git clone --depth 1 https://github.com/Kudaes/Puzzle /opt/kudaes/Puzzle \
  && git clone --depth 1 https://github.com/Kudaes/Eclipse /opt/kudaes/Eclipse \
  && sed -i 's/dinvoke_rs = "=0.2.2"/dinvoke_rs = "=0.2.0"/' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
+ && sed -i 's/version = "=0.62"/version = "0.51"/' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
+ && sed -i '/windows-core/d' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
  && sed -i 's/name = "data"/name = "mftool_data"/' /opt/kudaes/MFTool/data/Cargo.toml \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "mftool_data" }|' /opt/kudaes/MFTool/parser/Cargo.toml \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "mftool_data" }|' /opt/kudaes/MFTool/utils/Cargo.toml \
