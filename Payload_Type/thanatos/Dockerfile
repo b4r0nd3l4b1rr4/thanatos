@@ -82,30 +82,20 @@ WORKDIR /Mythic
 COPY main.py main.py
 COPY thanatos thanatos
 
-# 🧩 FIX: Copy Cargo config *before* vendoring so we can modify it temporarily
-COPY .docker/config.toml /root/.cargo/config.toml
-
-# 🧩 FIX: Fetch and vendor all dependencies (including lazy_static)
-# Temporarily remove offline and replace-with settings from Cargo config
-# so Cargo can access crates.io during the image build.
-# Then restore them afterwards to ensure Mythic builds stay offline.
 WORKDIR /Mythic/thanatos/agent_code
-# 🧩 FIX: Vendor dependencies to a global /vendor path so Mythic can use them
-RUN sed -i '/offline/d' /root/.cargo/config.toml \
- && sed -i '/replace-with/d' /root/.cargo/config.toml \
- && sed -i '/vendored-sources/d' /root/.cargo/config.toml \
+
+# Step 1: Write minimal cargo config for fetch/vendor (online access)
+RUN printf '[build]\nrustc-wrapper = "/usr/bin/sccache"\n' > /root/.cargo/config.toml \
  && mkdir -p /vendor /opt/kudaes \
  && git clone --depth 1 https://github.com/Kudaes/Shelter /opt/kudaes/Shelter \
  && git clone --depth 1 https://github.com/Kudaes/MFTool /opt/kudaes/MFTool \
  && git clone --depth 1 https://github.com/Kudaes/Puzzle /opt/kudaes/Puzzle \
  && git clone --depth 1 https://github.com/Kudaes/Eclipse /opt/kudaes/Eclipse \
  && cargo fetch \
- && cargo vendor /vendor \
- && echo "" >> /root/.cargo/config.toml \
- && echo "[source.crates-io]" >> /root/.cargo/config.toml \
- && echo "replace-with = \"vendored-sources\"" >> /root/.cargo/config.toml \
- && echo "[source.vendored-sources]" >> /root/.cargo/config.toml \
- && echo "directory = \"/vendor\"" >> /root/.cargo/config.toml
+ && cargo vendor /vendor
+
+# Step 2: Write final cargo config with vendored sources for offline builds
+RUN printf '[build]\nrustc-wrapper = "/usr/bin/sccache"\n\n[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "/vendor"\n' > /root/.cargo/config.toml
 
 
 # 🧩 EXPLANATION:
