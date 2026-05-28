@@ -59,7 +59,7 @@ libc = "0.2"
 windows-acl = "0.1"
 wmi = "0.9"
 dinvoke_rs = "0.2.0"
-unwinder = { path = "/opt/kudaes/Unwinder" }
+unwinder = { path = "/opt/kudaes/Unwinder/unwinder" }
 shelter = { path = "/opt/kudaes/Shelter" }
 mftool-parser = { path = "/opt/kudaes/MFTool/parser" }
 puzzle-sync-provider = { path = "/opt/kudaes/Puzzle/SyncProvider/provider" }
@@ -99,4 +99,4 @@ features = [
 ]
 
 [patch.crates-io]
-unwinder = { path = "/opt/kudaes/Unwinder" }
+unwinder = { path = "/opt/kudaes/Unwinder/unwinder" }
