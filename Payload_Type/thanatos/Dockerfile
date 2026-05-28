@@ -1,5 +1,4 @@
 ### Corrected Dockerfile for Thanatos payload
-### Comments with 🧩 mark the fixes related to vendoring/offline build
 
 # Note: Invoke this Dockerfile from the `Payload_Type/thanatos` directory using:
 #   docker build -t docker.io/mehrn00/thanatos:v0.1.17 -f .docker/Dockerfile .
@@ -9,7 +8,6 @@ FROM docker.io/library/fedora:39
 # Version of sccache to install
 ENV SCCACHE_VERSION v0.7.6
 
-# Install build dependencies
 # Install build dependencies
 RUN dnf install -y \
     python3.11 \
@@ -84,26 +82,22 @@ COPY thanatos thanatos
 
 WORKDIR /Mythic/thanatos/agent_code
 
-# Step 1: Write minimal cargo config for fetch/vendor (online access)
-RUN printf '[build]\nrustc-wrapper = "/usr/bin/sccache"\n' > /root/.cargo/config.toml \
- && mkdir -p /vendor /opt/kudaes \
+# Fetch and vendor all dependencies
+RUN mkdir -p /vendor /opt/kudaes \
  && git clone --depth 1 https://github.com/Kudaes/Shelter /opt/kudaes/Shelter \
  && git clone --depth 1 https://github.com/Kudaes/MFTool /opt/kudaes/MFTool \
  && git clone --depth 1 https://github.com/Kudaes/Puzzle /opt/kudaes/Puzzle \
  && git clone --depth 1 https://github.com/Kudaes/Eclipse /opt/kudaes/Eclipse \
+ && echo '[build]' > /root/.cargo/config.toml \
+ && echo 'rustc-wrapper = "/usr/bin/sccache"' >> /root/.cargo/config.toml \
  && cargo fetch \
- && cargo vendor /vendor
-
-# Step 2: Write final cargo config with vendored sources for offline builds
-RUN printf '[build]\nrustc-wrapper = "/usr/bin/sccache"\n\n[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "/vendor"\n' > /root/.cargo/config.toml
-
-
-# 🧩 EXPLANATION:
-# - We copy .docker/config.toml earlier (so it's present before vendoring)
-# - We strip offline/vendor lines temporarily
-# - We fetch and vendor crates (includes lazy_static)
-# - We restore the offline configuration afterwards
-# => Result: /vendor contains all crates and Mythic builds offline successfully
+ && cargo vendor /vendor \
+ && echo '[build]' > /root/.cargo/config.toml \
+ && echo 'rustc-wrapper = "/usr/bin/sccache"' >> /root/.cargo/config.toml \
+ && echo '[source.crates-io]' >> /root/.cargo/config.toml \
+ && echo 'replace-with = "vendored-sources"' >> /root/.cargo/config.toml \
+ && echo '[source.vendored-sources]' >> /root/.cargo/config.toml \
+ && echo 'directory = "/vendor"' >> /root/.cargo/config.toml
 
 WORKDIR /Mythic
 
