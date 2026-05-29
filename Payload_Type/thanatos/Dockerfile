@@ -110,6 +110,13 @@ RUN mkdir -p /vendor /opt/kudaes \
  && git clone --depth 1 https://github.com/Kudaes/Puzzle /opt/kudaes/Puzzle \
  && git clone --depth 1 https://github.com/Kudaes/Eclipse /opt/kudaes/Eclipse \
  && git clone --depth 1 https://github.com/Kudaes/DInvoke_rs /opt/kudaes/DInvoke_rs \
+ && echo 'pub use dinvoke;' > /opt/kudaes/DInvoke_rs/src/lib.rs \
+ && echo 'pub use data;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
+ && echo 'pub use manualmap;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
+ && echo 'pub use overload;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
+ && echo 'pub use dmanager;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
+ && echo 'pub use utils;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
+ && rm -f /opt/kudaes/DInvoke_rs/src/main.rs \
  && sed -i 's/name = "data"/name = "dinvoke_data"/' /opt/kudaes/DInvoke_rs/data/Cargo.toml \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "dinvoke_data" }|g' /opt/kudaes/DInvoke_rs/dinvoke/Cargo.toml /opt/kudaes/DInvoke_rs/manualmap/Cargo.toml /opt/kudaes/DInvoke_rs/overload/Cargo.toml /opt/kudaes/DInvoke_rs/dmanager/Cargo.toml /opt/kudaes/DInvoke_rs/utils/Cargo.toml \
  && sed -i 's|data = { path = "data" }|data = { path = "data", package = "dinvoke_data" }|' /opt/kudaes/DInvoke_rs/Cargo.toml \
