@@ -109,13 +109,14 @@ RUN mkdir -p /vendor /opt/kudaes \
  && git clone --depth 1 https://github.com/Kudaes/MFTool /opt/kudaes/MFTool \
  && git clone --depth 1 https://github.com/Kudaes/Puzzle /opt/kudaes/Puzzle \
  && git clone --depth 1 https://github.com/Kudaes/Eclipse /opt/kudaes/Eclipse \
- && sed -i 's/dinvoke_rs = "=0.2.2"/dinvoke_rs = "=0.2.0"/' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
- && sed -i 's/version = "=0.62"/version = "0.51"/' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
- && sed -i '/windows-core/d' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
+ && git clone --depth 1 https://github.com/Kudaes/DInvoke_rs /opt/kudaes/DInvoke_rs \
+ && sed -i 's|dinvoke_rs = "=0.2.2"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
  && sed -i 's/name = "data"/name = "mftool_data"/' /opt/kudaes/MFTool/data/Cargo.toml \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "mftool_data" }|' /opt/kudaes/MFTool/parser/Cargo.toml \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "mftool_data" }|' /opt/kudaes/MFTool/utils/Cargo.toml \
+ && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/MFTool/parser/Cargo.toml \
  && sed -i 's|unwinder = "=0.1.4"|unwinder = { path = "/opt/kudaes/Unwinder/unwinder" }|' /opt/kudaes/Shelter/Cargo.toml \
+ && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Shelter/Cargo.toml \
  && cd /opt/kudaes/Shelter \
  && printf 'fn main() {\n    let out_dir = std::env::var("OUT_DIR").unwrap();\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        let status = std::process::Command::new("uasm")\n            .args(&["-win64", "-Fo"])\n            .arg(format!("{}/stub.o", out_dir))\n            .arg("src/stub.asm")\n            .status().expect("uasm failed");\n        if !status.success() { panic!("uasm failed to assemble stub.asm"); }\n        let status = std::process::Command::new("x86_64-w64-mingw32-ar")\n            .args(&["crs"])\n            .arg(format!("{}/libstub.a", out_dir))\n            .arg(format!("{}/stub.o", out_dir))\n            .status().expect("ar failed");\n        if !status.success() { panic!("ar failed"); }\n        println!("cargo:rustc-link-search=native={}", out_dir);\n        println!("cargo:rustc-link-lib=static=stub");\n    } else {\n        cc::Build::new().file("src/stub.asm").compile("stub");\n    }\n}\n' > build.rs \
  && cd /Mythic/thanatos/agent_code \

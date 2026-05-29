@@ -58,7 +58,7 @@ libc = "0.2"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-acl = "0.1"
 wmi = "0.9"
-dinvoke_rs = "0.2.0"
+dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }
 unwinder = { path = "/opt/kudaes/Unwinder/unwinder" }
 shelter = { path = "/opt/kudaes/Shelter" }
 mftool-parser = { path = "/opt/kudaes/MFTool/parser", package = "parser" }
