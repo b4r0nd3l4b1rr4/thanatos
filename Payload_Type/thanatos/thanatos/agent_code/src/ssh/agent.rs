@@ -1,11 +1,14 @@
 use crate::AgentTask;
 use crate::mythic_success;
-use russh_keys::PublicKeyBase64;
 use serde::Deserialize;
 use std::env;
 use std::error::Error;
 use std::result::Result;
+
+#[cfg(unix)]
 use tokio::net::UnixStream;
+#[cfg(unix)]
+use russh_keys::PublicKeyBase64;
 
 #[derive(Debug, Deserialize)]
 struct SshAgentArgs {
@@ -30,6 +33,7 @@ pub fn ssh_agent(task: &AgentTask) -> Result<serde_json::Value, Box<dyn Error>> 
     Ok(user_output)
 }
 
+#[cfg(unix)]
 fn agent_connect(id: &str, socket: &str) -> Result<serde_json::Value, Box<dyn Error>> {
     let orig_agent = env::var("SSH_AUTH_SOCK");
 
@@ -54,6 +58,12 @@ fn agent_connect(id: &str, socket: &str) -> Result<serde_json::Value, Box<dyn Er
     Ok(mythic_success!(id, "Successfully connected to ssh agent"))
 }
 
+#[cfg(not(unix))]
+fn agent_connect(id: &str, _socket: &str) -> Result<serde_json::Value, Box<dyn Error>> {
+    Err("SSH agent not supported on Windows".into())
+}
+
+#[cfg(unix)]
 fn agent_list(id: &str) -> Result<serde_json::Value, Box<dyn Error>> {
     let socket_path = env::var("SSH_AUTH_SOCK")
         .map_err(|_| -> Box<dyn Error> { "Not connected to any ssh agent".into() })?;
@@ -84,6 +94,11 @@ fn agent_list(id: &str) -> Result<serde_json::Value, Box<dyn Error>> {
     };
 
     Ok(mythic_success!(id, user_output))
+}
+
+#[cfg(not(unix))]
+fn agent_list(id: &str) -> Result<serde_json::Value, Box<dyn Error>> {
+    Err("SSH agent not supported on Windows".into())
 }
 
 fn agent_disconnect(id: &str) -> Result<serde_json::Value, Box<dyn Error>> {
