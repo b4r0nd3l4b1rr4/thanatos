@@ -46,9 +46,15 @@ minreq = { version = "2.4", features = ["https-rustls-probe"] }
 # === Async runtime ===
 tokio = { version = "1.36", features = ["net", "rt-multi-thread", "io-util", "macros", "process", "sync", "time"] }
 
-# === Native crypto / SSH ===
-openssl = { version = "0.10", features = ["vendored"] }
-ssh2 = { version = "0.9", features = ["vendored-openssl"] }
+# === RSA key exchange (pure Rust, no openssl) ===
+rsa = "0.9"
+pkcs1 = "0.7"
+sha1 = "0.10"
+
+# === SSH (pure Rust, no openssl) ===
+russh = "0.46"
+russh-keys = "0.46"
+async-trait = "0.1"
 
 
 # === Platform-specific dependencies ===
