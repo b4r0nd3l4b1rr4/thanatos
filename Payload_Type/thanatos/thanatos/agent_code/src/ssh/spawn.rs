@@ -74,7 +74,7 @@ pub fn spawn_payload(
 
     sess.sftp_write(&path, &file_data, 0o700)?;
 
-    let (stdout, stderr, exit_status) = sess.channel_exec(&shell_cmd)?;
+    let (_stdout, stderr, exit_status) = sess.channel_exec(&shell_cmd)?;
 
     if exit_status != 0 {
         return Err(format!("Failed to run agent on system. {}", stderr).into());

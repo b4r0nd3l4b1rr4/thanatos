@@ -1,6 +1,5 @@
 use crate::AgentTask;
 use crate::mythic_success;
-use base64::{Engine as _, engine::general_purpose};
 use russh_keys::PublicKeyBase64;
 use serde::Deserialize;
 use std::env;
