@@ -1,6 +1,7 @@
 use crate::AgentTask;
 use crate::mythic_success;
 use base64::{Engine as _, engine::general_purpose};
+use russh_keys::PublicKeyBase64;
 use serde::Deserialize;
 use std::env;
 use std::error::Error;
@@ -58,16 +59,17 @@ fn agent_list(id: &str) -> Result<serde_json::Value, Box<dyn Error>> {
 
     let rt = tokio::runtime::Handle::current();
     let keys = rt.block_on(async {
-        let mut agent = russh_keys::agent::client::AgentClient::connect_env().await?;
-        let identities = agent.request_identities().await?;
-        Ok::<_, Box<dyn Error + Send + Sync>>(identities)
+        let mut agent = russh_keys::agent::client::AgentClient::connect_env().await
+            .map_err(|e| -> Box<dyn Error> { e.into() })?;
+        let identities = agent.request_identities().await
+            .map_err(|e| -> Box<dyn Error> { e.into() })?;
+        Ok::<_, Box<dyn Error>>(identities)
     })?;
 
     let user_output = if !keys.is_empty() {
         let mut tmp = String::new();
         for key in &keys {
-            let blob = key.public_key_bytes();
-            let b64_blob = general_purpose::STANDARD.encode(&blob);
+            let b64_blob = key.public_key_base64();
             tmp.push_str(&format!(
                 "Key type: {}\nbase64 blob: {}\n\n",
                 key.name(),

@@ -304,13 +304,18 @@ pub fn ssh_authenticate(args: &SshArgs) -> Result<SshSession, Box<dyn Error>> {
         let mut session = russh::client::connect(config, &*addr, handler).await?;
 
         if args.agent {
-            let mut agent = russh_keys::agent::client::AgentClient::connect_env().await?;
-            let identities = agent.request_identities().await?;
+            let mut agent = russh_keys::agent::client::AgentClient::connect_env().await
+                .map_err(|e| -> Box<dyn Error + Send + Sync> { e.into() })?;
+            let identities = agent.request_identities().await
+                .map_err(|e| -> Box<dyn Error + Send + Sync> { e.into() })?;
             let mut authenticated = false;
             for key in identities {
+                let agent_auth = russh_keys::agent::client::AgentClient::connect_env().await
+                    .map_err(|e| -> Box<dyn Error + Send + Sync> { e.into() })?;
                 if session
-                    .authenticate_publickey(&args.credentials.account, Arc::new(key))
-                    .await?
+                    .authenticate_publickey_with(&args.credentials.account, Arc::new(key), agent_auth)
+                    .await
+                    .unwrap_or(false)
                 {
                     authenticated = true;
                     break;

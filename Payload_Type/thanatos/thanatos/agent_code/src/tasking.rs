@@ -9,7 +9,7 @@ use std::sync::{
     mpsc, Arc,
 };
 
-// Import all other commands
+#[allow(unused_imports)]
 use crate::{
     askcreds, browser_cookies, c2manage, cat, cd, cleanup, clipboard, collection, cp, credentials, discovery, download, eclipse, evasion, execute, exit, getenv, getprivs, jobs, lateral, ldap, ls, minifilter, mkdir, mv, netstat, ntfs_read, persist, portfwd, portscan, ps, pwd,
     redirect, rm, screenshot, setenv, shell, shinject, sleep, ssh, stealth, token, unsetenv, upload, workinghours,
