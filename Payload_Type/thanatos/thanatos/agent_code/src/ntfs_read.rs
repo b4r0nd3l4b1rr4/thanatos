@@ -56,7 +56,7 @@ pub fn ntfs_read(
                     Some(entries) => {
                         let mut out = format!("Directory: {}\n\n", dir);
                         for (_id, entry) in &entries {
-                            out.push_str(&format!("  {}\n", entry.name));
+                            out.push_str(&format!("  {}\n", entry.filename));
                         }
                         tx.send(mythic_success!(task.id, out))?;
                     }

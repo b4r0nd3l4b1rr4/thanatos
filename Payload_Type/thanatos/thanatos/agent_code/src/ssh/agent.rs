@@ -5,6 +5,7 @@ use serde::Deserialize;
 use std::env;
 use std::error::Error;
 use std::result::Result;
+use tokio::net::UnixStream;
 
 #[derive(Debug, Deserialize)]
 struct SshAgentArgs {
@@ -36,7 +37,9 @@ fn agent_connect(id: &str, socket: &str) -> Result<serde_json::Value, Box<dyn Er
 
     let rt = tokio::runtime::Handle::current();
     let result = rt.block_on(async {
-        russh_keys::agent::client::AgentClient::connect_env().await
+        let stream = UnixStream::connect(socket).await?;
+        let _agent = russh_keys::agent::client::AgentClient::connect(stream);
+        Ok::<_, Box<dyn Error>>(())
     });
 
     if let Err(e) = result {
@@ -45,21 +48,21 @@ fn agent_connect(id: &str, socket: &str) -> Result<serde_json::Value, Box<dyn Er
         } else {
             env::remove_var("SSH_AUTH_SOCK");
         }
-        return Err(e.into());
+        return Err(e);
     }
 
     Ok(mythic_success!(id, "Successfully connected to ssh agent"))
 }
 
 fn agent_list(id: &str) -> Result<serde_json::Value, Box<dyn Error>> {
-    if env::var("SSH_AUTH_SOCK").is_err() {
-        return Err("Not connected to any ssh agent".into());
-    }
+    let socket_path = env::var("SSH_AUTH_SOCK")
+        .map_err(|_| -> Box<dyn Error> { "Not connected to any ssh agent".into() })?;
 
     let rt = tokio::runtime::Handle::current();
     let keys = rt.block_on(async {
-        let mut agent = russh_keys::agent::client::AgentClient::connect_env().await
-            .map_err(|e| -> Box<dyn Error> { e.into() })?;
+        let stream = UnixStream::connect(&socket_path).await
+            .map_err(|e| -> Box<dyn Error> { format!("Failed to connect to SSH agent: {}", e).into() })?;
+        let mut agent = russh_keys::agent::client::AgentClient::connect(stream);
         let identities = agent.request_identities().await
             .map_err(|e| -> Box<dyn Error> { e.into() })?;
         Ok::<_, Box<dyn Error>>(identities)
