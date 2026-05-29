@@ -121,6 +121,7 @@ RUN mkdir -p /vendor /opt/kudaes \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "mftool_data" }|' /opt/kudaes/MFTool/parser/Cargo.toml \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "mftool_data" }|' /opt/kudaes/MFTool/utils/Cargo.toml \
  && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/MFTool/parser/Cargo.toml \
+ && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/MFTool/utils/Cargo.toml \
  && sed -i 's|unwinder = "=0.1.4"|unwinder = { path = "/opt/kudaes/Unwinder/unwinder" }|' /opt/kudaes/Shelter/Cargo.toml \
  && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Shelter/Cargo.toml \
  && cd /opt/kudaes/Shelter \
