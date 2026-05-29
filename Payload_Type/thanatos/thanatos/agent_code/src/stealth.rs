@@ -15,13 +15,21 @@ struct StealthSleepArgs {
 pub fn do_stealth_sleep(secs: u64) {
     #[cfg(target_os = "windows")]
     {
-        let result = shelter::fluctuate(true, Some(secs as u32), None);
-        if result.is_err() {
-            let result2 = shelter::fluctuate(false, Some(secs as u32), None);
-            if result2.is_err() {
-                std::thread::sleep(std::time::Duration::from_secs(secs));
-            }
+        let ok = std::panic::catch_unwind(|| {
+            shelter::fluctuate(true, Some(secs as u32), None)
+        });
+        match ok {
+            Ok(Ok(())) => return,
+            _ => {}
         }
+        let ok2 = std::panic::catch_unwind(|| {
+            shelter::fluctuate(false, Some(secs as u32), None)
+        });
+        match ok2 {
+            Ok(Ok(())) => return,
+            _ => {}
+        }
+        std::thread::sleep(std::time::Duration::from_secs(secs));
     }
 
     #[cfg(not(target_os = "windows"))]
