@@ -144,6 +144,9 @@ RUN mkdir -p /vendor /opt/kudaes \
  && sed -i 's|version = "0.51.0"|version = "=0.51.1"|' /opt/kudaes/MFTool/utils/Cargo.toml \
  && find /opt/kudaes/Puzzle -name "*.rs" -exec sed -i 's/windows_core/windows::core/g' {} + \
  && sed -i 's/"Win32_Storage"/"Win32_Foundation", "Win32_Storage"/' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
+ && sed -i '1i\mod puzzle_utils {\n    pub unsafe fn pwstr_to_string(ptr: *mut u16) -> String {\n        if ptr.is_null() { return String::new(); }\n        let mut len = 0;\n        while *ptr.add(len) != 0 { len += 1; }\n        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))\n    }\n    pub fn str_to_wide_string(s: &str) -> Vec<u16> {\n        s.encode_utf16().chain(std::iter::once(0)).collect()\n    }\n}' /opt/kudaes/Puzzle/SyncProvider/provider/src/lib.rs \
+ && sed -i 's/dinvoke_rs::utils::pwstr_to_string/puzzle_utils::pwstr_to_string/g' /opt/kudaes/Puzzle/SyncProvider/provider/src/lib.rs \
+ && sed -i 's/dinvoke_rs::utils::str_to_wide_string/puzzle_utils::str_to_wide_string/g' /opt/kudaes/Puzzle/SyncProvider/provider/src/lib.rs \
  && printf 'fn main() {\n    println!("cargo:rustc-link-search=native=/opt/kudaes/Unwinder/unwinder/precompiled");\n    println!("cargo:rustc-link-lib=static=gateway");\n}\n' > /opt/kudaes/Unwinder/unwinder/build.rs \
  && mkdir -p /opt/kudaes/Unwinder/unwinder/precompiled \
  && uasm -win64 -Fo/opt/kudaes/Unwinder/unwinder/precompiled/gateway.o /opt/kudaes/Unwinder/unwinder/src/gateway.asm \
