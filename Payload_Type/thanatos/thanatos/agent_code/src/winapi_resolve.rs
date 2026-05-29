@@ -20,9 +20,11 @@ pub unsafe fn resolve(dll: &str, func: &str) -> Option<*mut std::ffi::c_void> {
             buffer: *const u16,
         }
 
-        let ntdll_base = dinvoke::get_module_base_address("ntdll.dll");
+        let ntdll_name = crate::obfstr::d(crate::obfstr::IOC_NTDLL);
+        let ntdll_base = dinvoke::get_module_base_address(&ntdll_name);
         if ntdll_base == 0 { return None; }
-        let ldr_load = dinvoke::get_function_address(ntdll_base, "LdrLoadDll");
+        let ldr_name = crate::obfstr::d(crate::obfstr::IOC_LDRLOADDLL);
+        let ldr_load = dinvoke::get_function_address(ntdll_base, &ldr_name);
         if ldr_load == 0 { return None; }
 
         let wide: Vec<u16> = dll.encode_utf16().chain(std::iter::once(0)).collect();
