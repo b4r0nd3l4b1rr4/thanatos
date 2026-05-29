@@ -109,21 +109,16 @@ RUN mkdir -p /vendor /opt/kudaes \
  && git clone --depth 1 https://github.com/Kudaes/MFTool /opt/kudaes/MFTool \
  && git clone --depth 1 https://github.com/Kudaes/Puzzle /opt/kudaes/Puzzle \
  && git clone --depth 1 https://github.com/Kudaes/Eclipse /opt/kudaes/Eclipse \
- && git clone --depth 1 https://github.com/Kudaes/DInvoke_rs /opt/kudaes/DInvoke_rs \
- && echo 'pub use dinvoke;' > /opt/kudaes/DInvoke_rs/src/lib.rs \
- && echo 'pub use data;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
- && echo 'pub use manualmap;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
- && echo 'pub use overload;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
- && echo 'pub use dmanager;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
- && echo 'pub use utils;' >> /opt/kudaes/DInvoke_rs/src/lib.rs \
+ && git clone https://github.com/Kudaes/DInvoke_rs /opt/kudaes/DInvoke_rs \
+ && cd /opt/kudaes/DInvoke_rs && git checkout b29ad9b && cd /Mythic/thanatos/agent_code \
+ && printf 'pub extern crate dinvoke;\npub extern crate data;\npub extern crate manualmap;\npub extern crate overload;\npub extern crate dmanager;\n' > /opt/kudaes/DInvoke_rs/src/lib.rs \
  && rm -f /opt/kudaes/DInvoke_rs/src/main.rs \
  && sed -i 's/name = "data"/name = "dinvoke_data"/' /opt/kudaes/DInvoke_rs/data/Cargo.toml \
- && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "dinvoke_data" }|g' /opt/kudaes/DInvoke_rs/dinvoke/Cargo.toml /opt/kudaes/DInvoke_rs/manualmap/Cargo.toml /opt/kudaes/DInvoke_rs/overload/Cargo.toml /opt/kudaes/DInvoke_rs/dmanager/Cargo.toml /opt/kudaes/DInvoke_rs/utils/Cargo.toml \
+ && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "dinvoke_data" }|g' /opt/kudaes/DInvoke_rs/dinvoke/Cargo.toml /opt/kudaes/DInvoke_rs/manualmap/Cargo.toml /opt/kudaes/DInvoke_rs/overload/Cargo.toml /opt/kudaes/DInvoke_rs/dmanager/Cargo.toml \
  && sed -i 's|data = { path = "data" }|data = { path = "data", package = "dinvoke_data" }|' /opt/kudaes/DInvoke_rs/Cargo.toml \
- && sed -i 's/name = "utils"/name = "dinvoke_utils"/' /opt/kudaes/DInvoke_rs/utils/Cargo.toml \
- && sed -i 's|utils = { path = "../utils" }|utils = { path = "../utils", package = "dinvoke_utils" }|g' /opt/kudaes/DInvoke_rs/dinvoke/Cargo.toml /opt/kudaes/DInvoke_rs/manualmap/Cargo.toml /opt/kudaes/DInvoke_rs/overload/Cargo.toml /opt/kudaes/DInvoke_rs/dmanager/Cargo.toml /opt/kudaes/DInvoke_rs/data/Cargo.toml \
- && sed -i 's|utils = { path = "utils" }|utils = { path = "utils", package = "dinvoke_utils" }|' /opt/kudaes/DInvoke_rs/Cargo.toml \
  && sed -i 's|dinvoke_rs = "=0.2.2"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
+ && sed -i 's/name = "data"/name = "puzzle_data"/' /opt/kudaes/Puzzle/SyncProvider/data/Cargo.toml \
+ && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "puzzle_data" }|' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
  && sed -i 's/name = "data"/name = "mftool_data"/' /opt/kudaes/MFTool/data/Cargo.toml \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "mftool_data" }|' /opt/kudaes/MFTool/parser/Cargo.toml \
  && sed -i 's|data = { path = "../data" }|data = { path = "../data", package = "mftool_data" }|' /opt/kudaes/MFTool/utils/Cargo.toml \
@@ -131,14 +126,26 @@ RUN mkdir -p /vendor /opt/kudaes \
  && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/MFTool/utils/Cargo.toml \
  && sed -i 's|unwinder = "=0.1.4"|unwinder = { path = "/opt/kudaes/Unwinder/unwinder" }|' /opt/kudaes/Shelter/Cargo.toml \
  && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Shelter/Cargo.toml \
+ && sed -i '/static_vcruntime/d' /opt/kudaes/DInvoke_rs/Cargo.toml \
+ && sed -i '/\[build-dependencies\]/d' /opt/kudaes/DInvoke_rs/Cargo.toml \
+ && printf 'fn main() {}\n' > /opt/kudaes/DInvoke_rs/build.rs \
  && cd /opt/kudaes/Shelter \
  && printf 'fn main() {\n    let out_dir = std::env::var("OUT_DIR").unwrap();\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        let status = std::process::Command::new("uasm")\n            .args(&["-win64", "-Fo"])\n            .arg(format!("{}/stub.o", out_dir))\n            .arg("src/stub.asm")\n            .status().expect("uasm failed");\n        if !status.success() { panic!("uasm failed to assemble stub.asm"); }\n        let status = std::process::Command::new("x86_64-w64-mingw32-ar")\n            .args(&["crs"])\n            .arg(format!("{}/libstub.a", out_dir))\n            .arg(format!("{}/stub.o", out_dir))\n            .status().expect("ar failed");\n        if !status.success() { panic!("ar failed"); }\n        println!("cargo:rustc-link-search=native={}", out_dir);\n        println!("cargo:rustc-link-lib=static=stub");\n    } else {\n        cc::Build::new().file("src/stub.asm").compile("stub");\n    }\n}\n' > build.rs \
  && cd /Mythic/thanatos/agent_code \
  && sed -i 's/"Win32_System_WindowsProgramming"/"Win32_System_WindowsProgramming", "Win32_System_Threading"/' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
  && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
  && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/DInvoke_rs/dinvoke/Cargo.toml \
+ && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/DInvoke_rs/data/Cargo.toml \
  && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
  && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/Shelter/Cargo.toml \
+ && sed -i 's|version = "=0.62"|version = "=0.51.1"|' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
+ && sed -i 's|version = "=0.62"|version = "=0.51.1"|' /opt/kudaes/Puzzle/SyncProvider/data/Cargo.toml \
+ && sed -i '/windows-core/d' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
+ && sed -i '/windows-core/d' /opt/kudaes/Puzzle/SyncProvider/data/Cargo.toml \
+ && sed -i 's|version = "0.51.0"|version = "=0.51.1"|' /opt/kudaes/MFTool/parser/Cargo.toml \
+ && sed -i 's|version = "0.51.0"|version = "=0.51.1"|' /opt/kudaes/MFTool/utils/Cargo.toml \
+ && find /opt/kudaes/Puzzle -name "*.rs" -exec sed -i 's/windows_core/windows::core/g' {} + \
+ && sed -i 's/"Win32_Storage"/"Win32_Foundation", "Win32_Storage"/' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
  && cd /opt/kudaes/Unwinder/unwinder \
  && printf 'fn main() {\n    let out_dir = std::env::var("OUT_DIR").unwrap();\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        let status = std::process::Command::new("uasm")\n            .args(&["-win64", "-Fo"])\n            .arg(format!("{}/gateway.o", out_dir))\n            .arg("src/gateway.asm")\n            .status().expect("uasm failed - install uasm");\n        if !status.success() { panic!("uasm failed to assemble gateway.asm"); }\n        let status = std::process::Command::new("x86_64-w64-mingw32-ar")\n            .args(&["crs"])\n            .arg(format!("{}/libgateway.a", out_dir))\n            .arg(format!("{}/gateway.o", out_dir))\n            .status().expect("ar failed");\n        if !status.success() { panic!("ar failed to create libgateway.a"); }\n        println!("cargo:rustc-link-search=native={}", out_dir);\n        println!("cargo:rustc-link-lib=static=gateway");\n    } else {\n        cc::Build::new().file("src/gateway.asm").compile("gateway");\n    }\n}\n' > build.rs \
  && cd /Mythic/thanatos/agent_code \
