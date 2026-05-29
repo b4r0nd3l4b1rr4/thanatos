@@ -110,4 +110,5 @@ features = [
   "winsvc",
   "winerror",
   "winreg",
+  "wtypesbase",
 ]
