@@ -77,7 +77,7 @@ shelter = { path = "/opt/kudaes/Shelter" }
 mftool-parser = { path = "/opt/kudaes/MFTool/parser", package = "parser" }
 puzzle-sync-provider = { path = "/opt/kudaes/Puzzle/SyncProvider/provider", package = "provider" }
 
-# winapi (scoped to windows target): añadidos los módulos que usamos en los ficheros
+# winapi (scoped to windows target)
 [target.'cfg(target_os = "windows")'.dependencies.winapi]
 version = "0.3"
 features = [
@@ -102,11 +102,12 @@ features = [
   "winuser",
   "wow64apiset",
   "sysinfoapi",
-
-  # módulos adicionales necesarios para GDI & utilidades usadas
   "wingdi",
   "combaseapi",
   "minwindef",
   "windef",
   "basetsd",
+  "winsvc",
+  "winerror",
+  "winreg",
 ]

