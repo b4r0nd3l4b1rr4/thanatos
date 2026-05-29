@@ -129,9 +129,7 @@ RUN mkdir -p /vendor /opt/kudaes \
  && sed -i '/static_vcruntime/d' /opt/kudaes/DInvoke_rs/Cargo.toml \
  && sed -i '/\[build-dependencies\]/d' /opt/kudaes/DInvoke_rs/Cargo.toml \
  && printf 'fn main() {}\n' > /opt/kudaes/DInvoke_rs/build.rs \
- && cd /opt/kudaes/Shelter \
- && printf 'fn main() {\n    let out_dir = std::env::var("OUT_DIR").unwrap();\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        let status = std::process::Command::new("uasm")\n            .args(&["-win64"])\n            .arg(format!("-Fo{}/stub.o", out_dir))\n            .arg("src/stub.asm")\n            .status().expect("uasm failed");\n        if !status.success() { panic!("uasm failed to assemble stub.asm"); }\n        let status = std::process::Command::new("x86_64-w64-mingw32-ar")\n            .args(&["crs"])\n            .arg(format!("{}/libstub.a", out_dir))\n            .arg(format!("{}/stub.o", out_dir))\n            .status().expect("ar failed");\n        if !status.success() { panic!("ar failed"); }\n        println!("cargo:rustc-link-search=native={}", out_dir);\n        println!("cargo:rustc-link-lib=static=stub");\n    } else {\n        cc::Build::new().file("src/stub.asm").compile("stub");\n    }\n}\n' > build.rs \
- && cd /Mythic/thanatos/agent_code \
+ && printf 'fn main() {\n    println!("cargo:rustc-link-search=native=/opt/kudaes/Shelter/precompiled");\n    println!("cargo:rustc-link-lib=static=stub");\n}\n' > /opt/kudaes/Shelter/build.rs \
  && sed -i 's/"Win32_System_WindowsProgramming"/"Win32_System_WindowsProgramming", "Win32_System_Threading"/' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
  && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
  && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/DInvoke_rs/dinvoke/Cargo.toml \
@@ -146,9 +144,13 @@ RUN mkdir -p /vendor /opt/kudaes \
  && sed -i 's|version = "0.51.0"|version = "=0.51.1"|' /opt/kudaes/MFTool/utils/Cargo.toml \
  && find /opt/kudaes/Puzzle -name "*.rs" -exec sed -i 's/windows_core/windows::core/g' {} + \
  && sed -i 's/"Win32_Storage"/"Win32_Foundation", "Win32_Storage"/' /opt/kudaes/Puzzle/SyncProvider/provider/Cargo.toml \
- && cd /opt/kudaes/Unwinder/unwinder \
- && printf 'fn main() {\n    let out_dir = std::env::var("OUT_DIR").unwrap();\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        let status = std::process::Command::new("uasm")\n            .args(&["-win64"])\n            .arg(format!("-Fo{}/gateway.o", out_dir))\n            .arg("src/gateway.asm")\n            .status().expect("uasm failed - install uasm");\n        if !status.success() { panic!("uasm failed to assemble gateway.asm"); }\n        let status = std::process::Command::new("x86_64-w64-mingw32-ar")\n            .args(&["crs"])\n            .arg(format!("{}/libgateway.a", out_dir))\n            .arg(format!("{}/gateway.o", out_dir))\n            .status().expect("ar failed");\n        if !status.success() { panic!("ar failed to create libgateway.a"); }\n        println!("cargo:rustc-link-search=native={}", out_dir);\n        println!("cargo:rustc-link-lib=static=gateway");\n    } else {\n        cc::Build::new().file("src/gateway.asm").compile("gateway");\n    }\n}\n' > build.rs \
- && cd /Mythic/thanatos/agent_code \
+ && printf 'fn main() {\n    println!("cargo:rustc-link-search=native=/opt/kudaes/Unwinder/unwinder/precompiled");\n    println!("cargo:rustc-link-lib=static=gateway");\n}\n' > /opt/kudaes/Unwinder/unwinder/build.rs \
+ && mkdir -p /opt/kudaes/Unwinder/unwinder/precompiled \
+ && uasm -win64 -Fo/opt/kudaes/Unwinder/unwinder/precompiled/gateway.o /opt/kudaes/Unwinder/unwinder/src/gateway.asm \
+ && x86_64-w64-mingw32-ar crs /opt/kudaes/Unwinder/unwinder/precompiled/libgateway.a /opt/kudaes/Unwinder/unwinder/precompiled/gateway.o \
+ && mkdir -p /opt/kudaes/Shelter/precompiled \
+ && uasm -win64 -Fo/opt/kudaes/Shelter/precompiled/stub.o /opt/kudaes/Shelter/src/stub.asm \
+ && x86_64-w64-mingw32-ar crs /opt/kudaes/Shelter/precompiled/libstub.a /opt/kudaes/Shelter/precompiled/stub.o \
  && echo '[build]' > /root/.cargo/config.toml \
  && echo 'rustc-wrapper = "/usr/bin/sccache"' >> /root/.cargo/config.toml \
  && cargo fetch \
