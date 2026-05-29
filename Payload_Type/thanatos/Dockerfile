@@ -162,6 +162,18 @@ RUN mkdir -p /vendor /opt/kudaes \
  && echo '[source.vendored-sources]' >> /root/.cargo/config.toml \
  && echo 'directory = "/vendor"' >> /root/.cargo/config.toml
 
+# Pre-build dependencies for the most common targets (caches ~225 compiled crates)
+RUN cd /Mythic/thanatos/agent_code \
+ && cargo build --target x86_64-pc-windows-gnu --release 2>&1 || true \
+ && mkdir -p /opt/x86_64-pc-windows-gnu \
+ && cp -r target/x86_64-pc-windows-gnu /opt/ \
+ && cp -r target/release /opt/x86_64-pc-windows-gnu/ \
+ && cargo build --target x86_64-unknown-linux-gnu --release 2>&1 || true \
+ && mkdir -p /opt/x86_64-unknown-linux-gnu \
+ && cp -r target/x86_64-unknown-linux-gnu /opt/ \
+ && cp -r target/release /opt/x86_64-unknown-linux-gnu/ \
+ && rm -rf target
+
 WORKDIR /Mythic
 
 # Configure sccache
