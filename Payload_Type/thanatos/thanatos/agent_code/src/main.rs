@@ -1,5 +1,3 @@
-#![windows_subsystem = "windows"]
-
 use thanatos::real_main;
 
 fn main() {
