@@ -128,12 +128,6 @@ fn main() {
         }
     }
 
-    // --- Linker flags for Windows targets ---
-    if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "windows" {
-        // GUI subsystem (set via main.rs #![windows_subsystem = "windows"])
-        // Add large address aware for 64-bit compatibility appearance
-        println!("cargo:rustc-link-arg=-Wl,--large-address-aware");
-    }
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=resources/app.rc");
