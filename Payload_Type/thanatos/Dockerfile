@@ -136,6 +136,9 @@ RUN mkdir -p /vendor /opt/kudaes \
  && cd /Mythic/thanatos/agent_code \
  && sed -i 's/"Win32_System_WindowsProgramming"/"Win32_System_WindowsProgramming", "Win32_System_Threading"/' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
  && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
+ && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/DInvoke_rs/dinvoke/Cargo.toml \
+ && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
+ && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/Shelter/Cargo.toml \
  && cd /opt/kudaes/Unwinder/unwinder \
  && printf 'fn main() {\n    let out_dir = std::env::var("OUT_DIR").unwrap();\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        let status = std::process::Command::new("uasm")\n            .args(&["-win64", "-Fo"])\n            .arg(format!("{}/gateway.o", out_dir))\n            .arg("src/gateway.asm")\n            .status().expect("uasm failed - install uasm");\n        if !status.success() { panic!("uasm failed to assemble gateway.asm"); }\n        let status = std::process::Command::new("x86_64-w64-mingw32-ar")\n            .args(&["crs"])\n            .arg(format!("{}/libgateway.a", out_dir))\n            .arg(format!("{}/gateway.o", out_dir))\n            .status().expect("ar failed");\n        if !status.success() { panic!("ar failed to create libgateway.a"); }\n        println!("cargo:rustc-link-search=native={}", out_dir);\n        println!("cargo:rustc-link-lib=static=gateway");\n    } else {\n        cc::Build::new().file("src/gateway.asm").compile("gateway");\n    }\n}\n' > build.rs \
  && cd /Mythic/thanatos/agent_code \
