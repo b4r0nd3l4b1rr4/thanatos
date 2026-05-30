@@ -72,10 +72,9 @@ ENV PATH=$PATH:/root/.cargo/bin
 # Install cargo-xwin for MSVC cross-compilation (PE indistinguishable from Visual Studio)
 RUN cargo install --locked cargo-xwin \
  && rustup component add llvm-tools \
- && cargo xwin --cache-dir /opt/xwin-cache \
+ && cargo xwin cache --cache-dir /opt/xwin-cache \
     --accept-license \
-    --arch x86_64 \
-    cache
+    --arch x86_64
 
 # Install lld as MSVC-compatible linker
 RUN dnf install -y lld && dnf clean all
