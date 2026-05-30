@@ -61,11 +61,24 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh \
     -t i686-unknown-linux-gnu \
     -t x86_64-unknown-linux-musl \
     -t x86_64-pc-windows-gnu \
-    -t i686-pc-windows-gnu
+    -t i686-pc-windows-gnu \
+    -t x86_64-pc-windows-msvc \
+    -t i686-pc-windows-msvc
 
 RUN rm -f rustup.sh
 
 ENV PATH=$PATH:/root/.cargo/bin
+
+# Install cargo-xwin for MSVC cross-compilation (PE indistinguishable from Visual Studio)
+RUN cargo install --locked cargo-xwin \
+ && rustup component add llvm-tools \
+ && cargo xwin --cache-dir /opt/xwin-cache \
+    --accept-license \
+    --arch x86_64 \
+    cache
+
+# Install lld as MSVC-compatible linker
+RUN dnf install -y lld && dnf clean all
 
 # Install sccache for caching Rust builds
 RUN curl -L \
@@ -129,7 +142,7 @@ RUN mkdir -p /vendor /opt/kudaes \
  && sed -i '/static_vcruntime/d' /opt/kudaes/DInvoke_rs/Cargo.toml \
  && sed -i '/\[build-dependencies\]/d' /opt/kudaes/DInvoke_rs/Cargo.toml \
  && printf 'fn main() {}\n' > /opt/kudaes/DInvoke_rs/build.rs \
- && printf 'fn main() {\n    println!("cargo:rustc-link-search=native=/opt/kudaes/Shelter/precompiled");\n    println!("cargo:rustc-link-lib=static=stub");\n}\n' > /opt/kudaes/Shelter/build.rs \
+ && printf 'fn main() {\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        println!("cargo:rustc-link-search=native=/opt/kudaes/Shelter/precompiled");\n        println!("cargo:rustc-link-lib=static=stub");\n    } else {\n        cc::Build::new().file("src/stub.asm").compile("stub");\n    }\n}\n' > /opt/kudaes/Shelter/build.rs \
  && sed -i 's/"Win32_System_WindowsProgramming"/"Win32_System_WindowsProgramming", "Win32_System_Threading"/' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
  && sed -i 's|dinvoke_rs = "=0.2.0"|dinvoke_rs = { path = "/opt/kudaes/DInvoke_rs", package = "dinvokeRs" }|' /opt/kudaes/Unwinder/unwinder/Cargo.toml \
  && sed -i 's|version = "0.51"|version = "=0.51.1"|' /opt/kudaes/DInvoke_rs/dinvoke/Cargo.toml \
@@ -147,7 +160,7 @@ RUN mkdir -p /vendor /opt/kudaes \
  && sed -i '1i\mod puzzle_utils {\n    pub unsafe fn pwstr_to_string(ptr: *const u16) -> String {\n        if ptr.is_null() { return String::new(); }\n        let mut len = 0;\n        while *ptr.add(len) != 0 { len += 1; }\n        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))\n    }\n    pub fn str_to_wide_string(s: &str) -> Vec<u16> {\n        s.encode_utf16().chain(std::iter::once(0)).collect()\n    }\n}' /opt/kudaes/Puzzle/SyncProvider/provider/src/lib.rs \
  && sed -i 's/dinvoke_rs::utils::pwstr_to_string/puzzle_utils::pwstr_to_string/g' /opt/kudaes/Puzzle/SyncProvider/provider/src/lib.rs \
  && sed -i 's/dinvoke_rs::utils::str_to_wide_string/puzzle_utils::str_to_wide_string/g' /opt/kudaes/Puzzle/SyncProvider/provider/src/lib.rs \
- && printf 'fn main() {\n    println!("cargo:rustc-link-search=native=/opt/kudaes/Unwinder/unwinder/precompiled");\n    println!("cargo:rustc-link-lib=static=gateway");\n}\n' > /opt/kudaes/Unwinder/unwinder/build.rs \
+ && printf 'fn main() {\n    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();\n    if target_env == "gnu" {\n        println!("cargo:rustc-link-search=native=/opt/kudaes/Unwinder/unwinder/precompiled");\n        println!("cargo:rustc-link-lib=static=gateway");\n    } else {\n        cc::Build::new().file("src/gateway.asm").compile("gateway");\n    }\n}\n' > /opt/kudaes/Unwinder/unwinder/build.rs \
  && mkdir -p /opt/kudaes/Unwinder/unwinder/precompiled \
  && uasm -win64 -Fo/opt/kudaes/Unwinder/unwinder/precompiled/gateway.o /opt/kudaes/Unwinder/unwinder/src/gateway.asm \
  && x86_64-w64-mingw32-ar crs /opt/kudaes/Unwinder/unwinder/precompiled/libgateway.a /opt/kudaes/Unwinder/unwinder/precompiled/gateway.o \
@@ -165,16 +178,16 @@ RUN mkdir -p /vendor /opt/kudaes \
  && echo '[source.vendored-sources]' >> /root/.cargo/config.toml \
  && echo 'directory = "/vendor"' >> /root/.cargo/config.toml
 
-# Pre-build dependencies for the most common targets (caches ~225 compiled crates)
+# Pre-build dependencies for the most common targets
 RUN cd /Mythic/thanatos/agent_code \
- && cargo build --target x86_64-pc-windows-gnu --release 2>&1 || true \
- && mkdir -p /opt/x86_64-pc-windows-gnu \
- && cp -r target/x86_64-pc-windows-gnu /opt/ \
- && cp -r target/release /opt/x86_64-pc-windows-gnu/ \
+ && cargo xwin build --target x86_64-pc-windows-msvc --release --xwin-cache-dir /opt/xwin-cache 2>&1 || true \
+ && mkdir -p /opt/x86_64-pc-windows-msvc \
+ && cp -r target/x86_64-pc-windows-msvc /opt/ 2>/dev/null || true \
+ && cp -r target/release /opt/x86_64-pc-windows-msvc/ 2>/dev/null || true \
  && cargo build --target x86_64-unknown-linux-gnu --release 2>&1 || true \
  && mkdir -p /opt/x86_64-unknown-linux-gnu \
- && cp -r target/x86_64-unknown-linux-gnu /opt/ \
- && cp -r target/release /opt/x86_64-unknown-linux-gnu/ \
+ && cp -r target/x86_64-unknown-linux-gnu /opt/ 2>/dev/null || true \
+ && cp -r target/release /opt/x86_64-unknown-linux-gnu/ 2>/dev/null || true \
  && rm -rf target
 
 WORKDIR /Mythic

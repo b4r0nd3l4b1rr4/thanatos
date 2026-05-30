@@ -157,7 +157,7 @@ class Thanatos(PayloadType):
                     rustflags.append("-C target-feature=+crt-static")
                     abi = "musl"
             elif self.selected_os == SupportedOS.Windows:
-                rustflags.append("-C target-feature=+crt-static")
+                pass  # MSVC target: CRT is statically linked by default
 
             # Fail if trying to build a 32 bit statically linked payload.
             # This is a limitation in musl/openssl since 32 bit integers in musl libc
@@ -169,7 +169,7 @@ class Thanatos(PayloadType):
             target_os = (
                 f"{arch}-unknown-linux-{abi}"
                 if self.selected_os == SupportedOS.Linux
-                else f"{arch}-pc-windows-gnu"
+                else f"{arch}-pc-windows-msvc"
             )
 
             # Combine the C2 parameters with the build parameters
@@ -191,16 +191,16 @@ class Thanatos(PayloadType):
             if arch == "i686" and self.selected_os == SupportedOS.Linux:
                 command += "CC_i686-unknown-linux-gnu=clang "
 
-            # Set up openssl environment variables
-            openssl_env = "OPENSSL_STATIC=yes "
-            if arch == "x86_64":
-                openssl_env += "OPENSSL_LIB_DIR=/usr/lib64 "
-            else:
-                openssl_env += "OPENSSL_LIB_DIR=/usr/lib "
-
-            openssl_env += "OPENSSL_INCLUDE_DIR=/usr/include "
-
-            command += openssl_env
+            # OpenSSL removed — using pure Rust crypto (rsa + russh)
+            # Only set openssl env for Linux builds that might still need it
+            if self.selected_os == SupportedOS.Linux:
+                openssl_env = "OPENSSL_STATIC=yes "
+                if arch == "x86_64":
+                    openssl_env += "OPENSSL_LIB_DIR=/usr/lib64 "
+                else:
+                    openssl_env += "OPENSSL_LIB_DIR=/usr/lib "
+                openssl_env += "OPENSSL_INCLUDE_DIR=/usr/include "
+                command += openssl_env
 
             # Add any rustflags if they exist
             if rustflags:
@@ -231,7 +231,10 @@ class Thanatos(PayloadType):
                     command += f"THANATOS_SHARED_ENTRYPOINT='{export_name}' "
 
             # Finish off the cargo command used for building the agent
-            command += f"cargo build --target {target_os} --release"
+            if self.selected_os == SupportedOS.Windows:
+                command += f"cargo xwin build --target {target_os} --release --xwin-cache-dir /opt/xwin-cache"
+            else:
+                command += f"cargo build --target {target_os} --release"
 
             if build_shared:
                 command += " -p thanatos_shared"
