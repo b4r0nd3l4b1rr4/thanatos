@@ -72,7 +72,7 @@ ENV PATH=$PATH:/root/.cargo/bin
 # Install cargo-xwin for MSVC cross-compilation (PE indistinguishable from Visual Studio)
 RUN cargo install --locked cargo-xwin \
  && rustup component add llvm-tools \
- && cargo xwin cache --cache-dir /opt/xwin-cache \
+ && XWIN_CACHE_DIR=/opt/xwin-cache cargo xwin cache xwin \
     --accept-license \
     --arch x86_64
 
@@ -179,7 +179,7 @@ RUN mkdir -p /vendor /opt/kudaes \
 
 # Pre-build dependencies for the most common targets
 RUN cd /Mythic/thanatos/agent_code \
- && cargo xwin build --target x86_64-pc-windows-msvc --release --xwin-cache-dir /opt/xwin-cache 2>&1 || true \
+ && XWIN_CACHE_DIR=/opt/xwin-cache cargo xwin build --target x86_64-pc-windows-msvc --release 2>&1 || true \
  && mkdir -p /opt/x86_64-pc-windows-msvc \
  && cp -r target/x86_64-pc-windows-msvc /opt/ 2>/dev/null || true \
  && cp -r target/release /opt/x86_64-pc-windows-msvc/ 2>/dev/null || true \

@@ -232,7 +232,7 @@ class Thanatos(PayloadType):
 
             # Finish off the cargo command used for building the agent
             if self.selected_os == SupportedOS.Windows:
-                command += f"cargo xwin build --target {target_os} --release --xwin-cache-dir /opt/xwin-cache"
+                command += f"XWIN_CACHE_DIR=/opt/xwin-cache cargo xwin build --target {target_os} --release"
             else:
                 command += f"cargo build --target {target_os} --release"
 
